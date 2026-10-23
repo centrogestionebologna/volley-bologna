@@ -1,0 +1,5 @@
+# Copia in .dev.vars (non versionato) per test locali con `wrangler dev`.
+FIREBASE_PROJECT_ID=iltuo-progetto
+FIREBASE_CLIENT_EMAIL=firebase-adminsdk-xxxxx@iltuo-progetto.iam.gserviceaccount.com
+FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
+MAINTENANCE_SECRET=cambia-questa-chiave-lunga

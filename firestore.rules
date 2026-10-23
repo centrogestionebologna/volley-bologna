@@ -1,0 +1,353 @@
+rules_version = '2';
+
+// Volley Bologna Community — regole Firestore
+// Pubblica con: firebase deploy --only firestore:rules
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Helper ──────────────────────────────────────────────────────────────
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function uid() {
+      return request.auth.uid;
+    }
+
+    function isSelf(id) {
+      return signedIn() && uid() == id;
+    }
+
+    function isAdmin() {
+      return signedIn() && exists(/databases/$(database)/documents/admins/$(uid()));
+    }
+
+    function userData(id) {
+      return get(/databases/$(database)/documents/users/$(id)).data;
+    }
+
+    function isBanned() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/users/$(uid()))
+        && userData(uid()).banned == true;
+    }
+
+    function isSilenced() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/users/$(uid()))
+        && userData(uid()).silencedUntil != null
+        && userData(uid()).silencedUntil > request.time;
+    }
+
+    function canWrite() {
+      return signedIn() && !isBanned() && !isSilenced();
+    }
+
+    function matchExists(id) {
+      return exists(/databases/$(database)/documents/matches/$(id));
+    }
+
+    function matchData(id) {
+      return get(/databases/$(database)/documents/matches/$(id)).data;
+    }
+
+    function isMatchOrganizer(id) {
+      return signedIn() && matchExists(id) && matchData(id).organizerId == uid();
+    }
+
+    function isMatchParticipant(id) {
+      return signedIn()
+        && exists(/databases/$(database)/documents/matches/$(id)/registrations/$(uid()));
+    }
+
+    function groupExists(id) {
+      return exists(/databases/$(database)/documents/groups/$(id));
+    }
+
+    function groupData(id) {
+      return get(/databases/$(database)/documents/groups/$(id)).data;
+    }
+
+    function isGroupOwner(id) {
+      return signedIn() && groupExists(id) && groupData(id).ownerId == uid();
+    }
+
+    function memberExists(id) {
+      return signedIn() && exists(/databases/$(database)/documents/groups/$(id)/members/$(uid()));
+    }
+
+    function membership(id) {
+      return get(/databases/$(database)/documents/groups/$(id)/members/$(uid())).data;
+    }
+
+    function isActiveMember(id) {
+      return memberExists(id) && membership(id).status == 'active';
+    }
+
+    // Accesso temporaneo ai dati privati dopo una segnalazione di irregolarità.
+    function hasIdentityAccess(userId) {
+      return signedIn()
+        && exists(/databases/$(database)/documents/identityAccess/$(uid() + '_' + userId))
+        && get(/databases/$(database)/documents/identityAccess/$(uid() + '_' + userId)).data.expiresAt > request.time;
+    }
+
+    // ── Profili ─────────────────────────────────────────────────────────────
+    match /users/{userId} {
+      allow get: if isSelf(userId) || isAdmin() || hasIdentityAccess(userId);
+      allow list: if isAdmin();
+      allow create: if isSelf(userId) && request.resource.data.uid == userId;
+      allow update: if isAdmin() || (
+        isSelf(userId)
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+          'banned', 'banReason', 'bannedAt', 'silencedUntil', 'silenceReason', 'verified', 'verificationNote'
+        ])
+        && (
+          !('verificationStatus' in request.resource.data.diff(resource.data).affectedKeys())
+          || request.resource.data.verificationStatus in ['none', 'submitted']
+        )
+      );
+      allow delete: if isAdmin();
+    }
+
+    match /publicProfiles/{userId} {
+      allow read: if signedIn();
+      allow create: if isSelf(userId) && request.resource.data.uid == userId;
+      allow update: if isAdmin() || (
+        isSelf(userId)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['nickname', 'bio', 'photoURL'])
+      );
+      allow delete: if isAdmin();
+    }
+
+    match /admins/{adminId} {
+      allow get: if signedIn() && (isSelf(adminId) || isAdmin());
+      allow list: if isAdmin();
+      allow write: if isAdmin();
+    }
+
+    // ── Impostazioni ────────────────────────────────────────────────────────
+    match /settings/{docId} {
+      allow read: if signedIn();
+      allow write: if isAdmin();
+    }
+
+    match /system/{docId} {
+      allow read: if isAdmin();
+      allow write: if false; // solo service account (cron)
+    }
+
+    // ── Match ───────────────────────────────────────────────────────────────
+    match /matches/{matchId} {
+      allow read: if signedIn();
+      allow create: if canWrite() && request.resource.data.organizerId == uid();
+      allow update: if isAdmin()
+        || isMatchOrganizer(matchId)
+        || (
+          isMatchParticipant(matchId)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'confirmedCount', 'waitlistCount', 'registrationSeq', 'pendingOffer', 'pendingOfferUid', 'updatedAt'
+          ])
+        );
+      allow delete: if isAdmin() || isMatchOrganizer(matchId);
+    }
+
+    match /matches/{matchId}/registrations/{regId} {
+      allow read: if signedIn();
+      allow create: if canWrite()
+        && regId == uid()
+        && request.resource.data.uid == uid()
+        && matchExists(matchId)
+        && matchData(matchId).status == 'open'
+        && request.resource.data.status in ['confirmed', 'waitlist']
+        && request.resource.data.seq is int;
+      allow update: if isAdmin()
+        || isMatchOrganizer(matchId)
+        || (
+          regId == uid()
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'confirmedAt', 'offerExpiresAt'])
+        )
+        || (
+          signedIn()
+          && resource.data.status == 'waitlist'
+          && request.resource.data.status == 'offered'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'offerExpiresAt'])
+        );
+      allow delete: if isAdmin() || isMatchOrganizer(matchId) || regId == uid();
+    }
+
+    match /recurringMatches/{ruleId} {
+      allow read: if signedIn();
+      allow create: if canWrite() && request.resource.data.organizerId == uid();
+      allow update: if isAdmin() || (signedIn() && resource.data.organizerId == uid());
+      allow delete: if isAdmin() || (signedIn() && resource.data.organizerId == uid());
+    }
+
+    // ── Gruppi ──────────────────────────────────────────────────────────────
+    match /groups/{groupId} {
+      allow read: if signedIn();
+      allow create: if canWrite() && request.resource.data.ownerId == uid();
+      allow update: if isAdmin()
+        || isGroupOwner(groupId)
+        || (
+          signedIn()
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'memberCount', 'pendingCount', 'updatedAt'
+          ])
+        );
+      allow delete: if isAdmin() || isGroupOwner(groupId);
+    }
+
+    match /groupSecrets/{groupId} {
+      allow get: if isAdmin() || isGroupOwner(groupId);
+      allow list: if false;
+      allow create, update: if isGroupOwner(groupId) || isAdmin();
+      allow delete: if isAdmin() || isGroupOwner(groupId);
+    }
+
+    match /groups/{groupId}/members/{memberId} {
+      allow read: if signedIn();
+
+      allow create: if canWrite()
+        && memberId == uid()
+        && request.resource.data.uid == uid()
+        && groupExists(groupId)
+        && !(uid() in groupData(groupId).bannedUids)
+        && (
+          (
+            groupData(groupId).visibility == 'public'
+            && request.resource.data.status == 'active'
+            && request.resource.data.inviteHash == null
+          )
+          || (
+            groupData(groupId).visibility == 'private'
+            && request.resource.data.status == 'pending'
+            && request.resource.data.inviteHash == null
+          )
+          || (
+            request.resource.data.status == 'active'
+            && request.resource.data.inviteHash != null
+            && get(/databases/$(database)/documents/groupSecrets/$(groupId)).data.inviteHash == request.resource.data.inviteHash
+          )
+        );
+
+      allow update: if isAdmin()
+        || isGroupOwner(groupId)
+        || (
+          memberId == uid()
+          && resource.data.status == 'pending'
+          && request.resource.data.status == 'active'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'inviteHash'])
+          && request.resource.data.inviteHash != null
+          && get(/databases/$(database)/documents/groupSecrets/$(groupId)).data.inviteHash == request.resource.data.inviteHash
+        )
+        || (
+          memberId == uid()
+          && resource.data.status == 'pending'
+          && request.resource.data.status == 'active'
+          && groupData(groupId).visibility == 'public'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
+        );
+
+      allow delete: if isAdmin() || isGroupOwner(groupId) || memberId == uid();
+    }
+
+    match /groups/{groupId}/messages/{messageId} {
+      allow read: if isAdmin() || isActiveMember(groupId);
+      allow create: if canWrite()
+        && isActiveMember(groupId)
+        && !(uid() in groupData(groupId).bannedUids)
+        && request.resource.data.authorId == uid()
+        && request.resource.data.deleted == false
+        && request.resource.data.text is string
+        && request.resource.data.text.size() > 0
+        && request.resource.data.text.size() <= 1200;
+      allow update: if isAdmin()
+        || isGroupOwner(groupId)
+        || (
+          signedIn()
+          && resource.data.authorId == uid()
+          && resource.data.deleted == false
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'text', 'editedAt', 'deleted', 'deletedAt', 'deletedBy'
+          ])
+          && (
+            !('deleted' in request.resource.data.diff(resource.data).affectedKeys())
+            || request.resource.data.deleted == true
+          )
+        );
+      allow delete: if isAdmin() || isGroupOwner(groupId);
+    }
+
+    // ── Chat generale ───────────────────────────────────────────────────────
+    match /chats/general {
+      allow read: if signedIn();
+      allow write: if isAdmin();
+    }
+
+    match /chats/general/messages/{messageId} {
+      allow read: if signedIn();
+      allow create: if canWrite()
+        && request.resource.data.authorId == uid()
+        && request.resource.data.deleted == false
+        && request.resource.data.text is string
+        && request.resource.data.text.size() > 0
+        && request.resource.data.text.size() <= 1200;
+      allow update: if isAdmin()
+        || (
+          signedIn()
+          && resource.data.authorId == uid()
+          && resource.data.deleted == false
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'text', 'editedAt', 'deleted', 'deletedAt', 'deletedBy'
+          ])
+          && (
+            !('deleted' in request.resource.data.diff(resource.data).affectedKeys())
+            || request.resource.data.deleted == true
+          )
+        );
+      allow delete: if isAdmin();
+    }
+
+    // ── Reputazione (privata per organizzatore) ─────────────────────────────
+    match /organizers/{organizerId}/trusted/{userId} {
+      allow read, write: if isAdmin() || isSelf(organizerId);
+    }
+
+    match /organizers/{organizerId}/ratings/{userId} {
+      allow read, write: if isAdmin() || isSelf(organizerId);
+    }
+
+    // ── Segnalazioni, accessi e contestazioni ───────────────────────────────
+    match /reports/{reportId} {
+      allow create: if signedIn()
+        && request.resource.data.reporterId == uid()
+        && request.resource.data.status == 'open';
+      allow get: if isAdmin() || (signedIn() && resource.data.reporterId == uid());
+      allow list: if isAdmin();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /identityAccess/{accessId} {
+      allow create: if signedIn()
+        && request.resource.data.organizerId == uid()
+        && exists(/databases/$(database)/documents/reports/$(request.resource.data.reportId))
+        && get(/databases/$(database)/documents/reports/$(request.resource.data.reportId)).data.reporterId == uid()
+        && get(/databases/$(database)/documents/reports/$(request.resource.data.reportId)).data.targetUserId == request.resource.data.userId
+        && request.resource.data.expiresAt is timestamp
+        && request.resource.data.expiresAt <= request.time + duration.value(30, 'd');
+      allow read: if isAdmin() || (signedIn() && resource.data.organizerId == uid());
+      allow update, delete: if isAdmin();
+    }
+
+    match /disputes/{disputeId} {
+      allow create: if signedIn() && request.resource.data.organizerId == uid();
+      allow read, update, delete: if isAdmin();
+    }
+
+    // Tutto il resto è chiuso.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

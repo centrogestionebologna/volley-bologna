@@ -1,0 +1,19 @@
+# Cloudflare Worker per la manutenzione automatica di Volley Bologna Community.
+# Deploy:  cd worker && npx wrangler deploy
+# Secrets: npx wrangler secret put FIREBASE_CLIENT_EMAIL
+#          npx wrangler secret put FIREBASE_PRIVATE_KEY
+#          npx wrangler secret put MAINTENANCE_SECRET
+name = "volley-bologna-cron"
+main = "src/index.js"
+compatibility_date = "2026-01-01"
+
+[observability]
+enabled = true
+
+[triggers]
+# Ogni 10 minuti: offerte riserve scadute. Alle 03:xx UTC pulizia chat (30 giorni),
+# alle 05:xx UTC pubblicazione dei match ricorrenti.
+crons = ["*/10 * * * *"]
+
+[vars]
+FIREBASE_PROJECT_ID = "sostituisci-con-il-tuo-project-id"
