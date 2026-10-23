@@ -3,7 +3,7 @@
 Webapp per la community di pallavolisti di Bologna: match, iscrizioni con lista riserve,
 gruppi con chat, chat generale stile WhatsApp, reputazione degli organizzatori e pannello admin.
 
-Stack: **React + Vite** · **Firebase Auth (Google)** · **Cloud Firestore** · **Cloudflare Pages** · **Cloudflare Workers + Cron Triggers**.
+Stack: **React + Vite** · **Firebase Auth (Google)** · **Cloud Firestore** · **Cloudflare Workers** (asset statici) · **Cloudflare Workers + Cron Triggers**.
 Nessun servizio a pagamento obbligatorio, nessun pagamento in-app: tutto rientra nei piani gratuiti.
 
 ---
@@ -197,16 +197,28 @@ Endpoint manuali: `POST /run` (tutte le manutenzioni), `POST /expire-offers`, `P
 
 ---
 
-## 6. Deploy su Cloudflare Pages
+## 6. Deploy su Cloudflare Workers
 
-1. **Workers & Pages → Create → Pages → Connect to Git** (o *Direct Upload*).
-2. Build command: `npm run build` · Output directory: `dist`.
-3. Environment variables: le stesse `VITE_FIREBASE_*` del file `.env.local`.
-4. Dopo il primo deploy aggiungi `https://<progetto>.pages.dev` ai domini autorizzati Firebase.
+L'app è una SPA di soli file statici: la serve un Worker senza logica, configurato in
+[wrangler.jsonc](wrangler.jsonc).
 
-`vite.config.js` non richiede configurazioni particolari: l'app è una SPA, quindi imposta
-un fallback su `index.html`. Con *Direct Upload* crea un file `_redirects` in `public/` con
-`/* /index.html 200` (con il deploy da Git il fallback SPA è gestito da Pages).
+1. **Workers & Pages → Create → Workers → Connect to Git** e seleziona il repository.
+2. Build command: `npm run build` · Deploy command: `npx wrangler deploy`.
+3. Environment variables: le stesse `VITE_FIREBASE_*` del file `.env.local` (servono in build,
+   perché Vite le incorpora nel bundle: se le aggiungi dopo, rilancia un deploy).
+4. Dopo il primo deploy aggiungi `https://volley-bologna.<account>.workers.dev` ai domini
+   autorizzati di Firebase (Authentication → Settings → Authorized domains).
+
+Il routing SPA è gestito da `assets.not_found_handling: "single-page-application"` in
+`wrangler.jsonc`: ogni route sconosciuta (es. `/match/abc`) restituisce `index.html`.
+
+Non usare un file `public/_redirects` con `/* /index.html 200`: su Workers quella regola
+viene rifiutata con *Infinite loop detected in this rule* (errore 100324), perché il file finisce
+in `dist/` e viene letto come redirect reale. Il fallback va tenuto solo nella configurazione
+Wrangler, come già fatto.
+
+In locale il deploy si prova con `npm run deploy`; per vedere il sito servito da Wrangler
+prima di pubblicare: `npm run build && npx wrangler dev`.
 
 ---
 
@@ -216,7 +228,7 @@ un fallback su `index.html`. Con *Direct Upload* crea un file `_redirects` in `p
 | --- | --- | --- |
 | Firebase Auth | 50k MAU (Google) | ampiamente sufficiente |
 | Firestore Spark | 50k letture/giorno, 20k scritture/giorno, 1 GiB | chat con paginazione 40 messaggi, listener solo sulle schermate aperte |
-| Cloudflare Pages | 500 build/mese, banda illimitata | deploy da Git |
+| Cloudflare Workers (asset statici) | richieste incluse nel piano, asset serviti da edge | hosting della SPA |
 | Cloudflare Workers | 100k richieste/giorno | cron ogni 10 min ≈ 4.3k richieste/mese |
 
 Accorgimenti già applicati: paginazione dei messaggi, listener per-match invece che globali,

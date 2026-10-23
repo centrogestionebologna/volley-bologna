@@ -1,0 +1,15 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "volley-bologna",
+  "compatibility_date": "2026-10-23",
+  "observability": {
+    "enabled": true
+  },
+  // La SPA viene servita direttamente da dist/: nessun Worker script, solo asset.
+  // "single-page-application" fa sì che ogni route sconosciuta (es. /match/abc)
+  // restituisca index.html, quindi il routing di React funziona anche con reload.
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "single-page-application"
+  }
+}
