@@ -3,6 +3,9 @@ const env = import.meta.env;
 export const APP_NAME = 'Volley Bologna Community';
 export const ADMIN_NAME = 'Adriano';
 
+/** Logo della community: sostituibile con un'immagine diversa via VITE_LOGO_URL. */
+export const LOGO_URL = env.VITE_LOGO_URL || '/logo.svg';
+
 export const firebaseConfig = {
   apiKey: env.VITE_FIREBASE_API_KEY || '',
   authDomain: env.VITE_FIREBASE_AUTH_DOMAIN || '',
@@ -12,12 +15,19 @@ export const firebaseConfig = {
   appId: env.VITE_FIREBASE_APP_ID || '',
 };
 
-export const isFirebaseConfigured = Boolean(
-  firebaseConfig.apiKey && firebaseConfig.projectId && firebaseConfig.appId && firebaseConfig.authDomain
-);
+const requiredFirebaseKeys = {
+  VITE_FIREBASE_API_KEY: firebaseConfig.apiKey,
+  VITE_FIREBASE_AUTH_DOMAIN: firebaseConfig.authDomain,
+  VITE_FIREBASE_PROJECT_ID: firebaseConfig.projectId,
+  VITE_FIREBASE_APP_ID: firebaseConfig.appId,
+};
 
-export const forceDemo = env.VITE_DEMO_MODE === 'true';
-export const demoMode = forceDemo || !isFirebaseConfigured;
+export const missingFirebaseKeys = Object.entries(requiredFirebaseKeys)
+  .filter(([, value]) => !value)
+  .map(([key]) => key);
+
+/** Senza queste variabili l'app non può funzionare: nessun fallback locale. */
+export const isFirebaseConfigured = missingFirebaseKeys.length === 0;
 
 /** Limiti e costanti di prodotto (tutti compatibili con i piani gratuiti). */
 export const LIMITS = {

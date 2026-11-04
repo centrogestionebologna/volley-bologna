@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { useAuth } from './auth/AuthProvider';
 import { AppShell } from './components/AppShell';
+import { Logo } from './components/Logo';
 import { Login } from './pages/Login';
 import { Home } from './pages/Home';
 import { Matches } from './pages/Matches';
@@ -17,7 +18,7 @@ import { Admin } from './pages/Admin';
 function Splash() {
   return (
     <div className="splash">
-      <span className="splash-ball">🏐</span>
+      <Logo size={56} className="splash-logo" />
       <strong>Volley Bologna Community</strong>
       <span className="spinner" />
     </div>

@@ -7,13 +7,12 @@ import {
   MessageCircle,
   Shield,
   ShieldAlert,
-  Sparkles,
   UserRound,
   Users,
-  Volleyball,
 } from 'lucide-react';
 import { useAuth } from '../auth/AuthProvider';
 import { Avatar, Chip } from './ui';
+import { Logo } from './Logo';
 import { Countdown } from './Countdown';
 import { formatDateTime } from '../lib/format';
 
@@ -34,7 +33,7 @@ const MOBILE_NAV = [
 ];
 
 export function AppShell() {
-  const { nickname, profile, isAdmin, isDemo, isBanned, offers, signOut, user } = useAuth();
+  const { nickname, profile, isAdmin, isBanned, offers, signOut, user } = useAuth();
   const navigate = useNavigate();
   const nextOffer = offers?.[0];
 
@@ -43,7 +42,7 @@ export function AppShell() {
       <aside className="sidebar">
         <NavLink to="/" className="brand">
           <span className="brand-mark">
-            <Volleyball size={23} strokeWidth={2} />
+            <Logo size={34} />
           </span>
           <span className="brand-text">
             <strong>Volley Bologna</strong>
@@ -67,15 +66,6 @@ export function AppShell() {
         </nav>
 
         <div className="sidebar-foot">
-          {isDemo ? (
-            <div className="sidebar-note">
-              <Sparkles size={15} />
-              <div>
-                <strong>Modalità demo</strong>
-                <span>Dati salvati solo in questo browser.</span>
-              </div>
-            </div>
-          ) : null}
           <NavLink to="/profilo" className="sidebar-user">
             <Avatar name={nickname} src={profile?.photoURL || user?.photoURL} size="sm" />
             <span>
@@ -96,11 +86,6 @@ export function AppShell() {
             <strong>Volley Bologna</strong>
           </NavLink>
           <div className="topbar-center">
-            {isDemo ? (
-              <Chip tone="amber" icon={Sparkles}>
-                Demo
-              </Chip>
-            ) : null}
             {profile?.verified ? (
               <Chip tone="green" icon={Shield}>
                 Verificato

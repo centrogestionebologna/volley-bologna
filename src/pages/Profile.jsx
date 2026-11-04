@@ -7,17 +7,14 @@ import {
   LogOut,
   Mail,
   Phone,
-  RefreshCw,
   Shield,
   ShieldCheck,
-  Sparkles,
   Trophy,
   UserRound,
 } from 'lucide-react';
 import { useAuth } from '../auth/AuthProvider';
 import { store } from '../backend';
 import { useAsync } from '../lib/hooks';
-import { DEMO_ACCOUNTS } from '../demo/seed';
 import {
   saveNickname,
   savePrivateData,
@@ -30,7 +27,7 @@ import { useToast } from '../components/Toast';
 import { formatDateShort, formatDateTime, toDate } from '../lib/format';
 
 export function Profile() {
-  const { uid, user, profile, nickname, isAdmin, isDemo, signOut, signInDemo, refresh } = useAuth();
+  const { uid, user, profile, nickname, isAdmin, signOut, refresh } = useAuth();
   const toast = useToast();
 
   const [nick, setNick] = useState(nickname);
@@ -110,14 +107,6 @@ export function Profile() {
     } catch {
       window.prompt('Il tuo ID utente:', uid);
     }
-  };
-
-  const resetDemo = async () => {
-    if (!window.confirm('Ripristinare tutti i dati demo? Le modifiche locali andranno perse.')) return;
-    await store.resetDemoData();
-    await refresh();
-    toast.success('Dati demo ripristinati.');
-    window.location.reload();
   };
 
   const silenceUntil = toDate(profile?.silencedUntil);
@@ -360,31 +349,6 @@ export function Profile() {
               ) : null}
             </div>
           </section>
-
-          {isDemo ? (
-            <section className="card card-pad">
-              <h2 className="card-title">
-                <Sparkles size={17} /> Account demo
-              </h2>
-              <div className="demo-switch">
-                {DEMO_ACCOUNTS.map((account) => (
-                  <button
-                    key={account.uid}
-                    type="button"
-                    className={`demo-switch-item ${account.uid === uid ? 'active' : ''}`}
-                    onClick={() => signInDemo(account.uid)}
-                    disabled={account.uid === uid}
-                  >
-                    <span>{account.name}</span>
-                    <small>{account.role}</small>
-                  </button>
-                ))}
-              </div>
-              <button type="button" className="btn btn-ghost btn-sm btn-block" onClick={resetDemo}>
-                <RefreshCw size={14} /> Ripristina dati demo
-              </button>
-            </section>
-          ) : null}
 
         </aside>
       </div>

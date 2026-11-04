@@ -3,43 +3,22 @@
 Webapp per la community di pallavolisti di Bologna: match, iscrizioni con lista riserve,
 gruppi con chat, chat generale stile WhatsApp, reputazione degli organizzatori e pannello admin.
 
-Stack: **React + Vite** · **Firebase Auth (Google)** · **Cloud Firestore** · **Cloudflare Workers** (asset statici) · **Cloudflare Workers + Cron Triggers**.
+Stack: **React + Vite** · **Firebase Auth (Google)** · **Cloud Firestore** · **Cloudflare Workers**
+(asset statici) · **Cloudflare Workers + Cron Triggers**.
+
 Nessun servizio a pagamento obbligatorio, nessun pagamento in-app: tutto rientra nei piani gratuiti.
 
----
-
-## 1. Avvio rapido (modalità demo, zero configurazione)
-
-```bash
-npm install
-npm run dev
-```
-
-Senza variabili d'ambiente l'app parte in **modalità demo**: i dati vivono in `localStorage`
-tramite un adapter che espone la stessa interfaccia di Firestore, quindi si possono provare
-tutti i flussi (login finto, match, riserve, chat, gruppi, admin) senza creare un progetto Firebase.
-
-Account demo disponibili nella pagina di login:
-
-| Utente | Ruolo |
-| --- | --- |
-| Adriano | Admin della piattaforma |
-| Giulia Ferri | Organizzatrice |
-| Marco Bellini | Giocatore |
-| Sara Neri | Giocatrice |
-
-Per forzare la demo anche con Firebase configurato: `VITE_DEMO_MODE=true`.
-
-Per resettare i dati demo: dalla pagina Profilo → *Reset dati demo* (o svuota il `localStorage`).
+> **Nessuna modalità demo.** L'app usa solo Firebase: senza configurazione mostra una schermata
+> di setup e non permette di entrare. Non esiste alcun fallback su `localStorage`.
 
 ---
 
-## 2. Configurazione Firebase
+## 1. Configurazione (obbligatoria, una volta sola)
 
 1. Crea un progetto su [console.firebase.google.com](https://console.firebase.google.com) (piano Spark, gratuito).
 2. **Authentication → Sign-in method → Google**: abilita e imposta l'email di supporto.
 3. **Authentication → Settings → Authorized domains**: aggiungi `localhost` e il dominio
-   `<progetto>.pages.dev` (e l'eventuale dominio custom).
+   `<progetto>.pages.dev` (o il dominio custom del deploy).
 4. **Firestore Database**: crea il database in modalità *production*, location `eur3` (Europa).
 5. **Impostazioni progetto → Le tue app → Web**: registra l'app e copia la config.
 6. Copia `.env.example` in `.env.local` e compila:
@@ -60,7 +39,7 @@ VITE_FIREBASE_APP_ID=...
 Le variabili `VITE_*` sono pubbliche per definizione: la sicurezza sta nelle regole Firestore,
 non nella segretezza della config.
 
-### Deploy di regole e indici
+7. Pubblica regole e indici:
 
 ```bash
 npm install -g firebase-tools   # oppure npx firebase-tools
@@ -75,27 +54,52 @@ ban e mute gestiti solo dall'admin, segnalazioni non cancellabili dagli utenti.
 
 ### Primo admin
 
-L'admin iniziale è **Adriano**. Dopo il primo login con Google:
+Il primo amministratore va creato a mano, perché le regole consentono di scrivere in `admins/`
+solo a chi è già admin:
 
-1. apri Firestore → collezione `users` → documento con il tuo uid;
-2. imposta `role: "admin"` e `nickname: "Adriano"`;
-3. ricarica l'app: compare la voce **Admin** nella sidebar.
+1. accedi una volta con Google: l'app crea automaticamente `users/{uid}` e `publicProfiles/{uid}`;
+2. apri Firebase Console → Firestore → collezione `admins` → documento con **ID = uid dell'utente**;
+3. campi consigliati: `uid` (string), `name` (string), `createdAt` (timestamp);
+4. ricarica l'app: compare la voce **Amministrazione** nella sidebar.
 
 Da quel momento i ruoli si gestiscono dalla dashboard (Impostazioni → *Promuovi admin*).
+
+---
+
+## 2. Avvio in locale
+
+```bash
+npm install
+cp .env.example .env.local   # compila le VITE_FIREBASE_*
+npm run dev
+```
+
+Senza `.env.local` la pagina mostra la schermata **“Collega Volley Bologna Community a Firebase”**
+con l'elenco delle variabili mancanti: è il comportamento previsto, non un errore.
+
+Build e anteprima della build:
+
+```bash
+npm run build
+npm run preview
+```
 
 ---
 
 ## 3. Struttura del progetto
 
 ```
+public/
+  logo.svg               logo della community (favicon e interfaccia)
 src/
-  config.js              costanti, env, limiti prodotto (retention 30gg, offerte 30min)
-  backend.js             sceglie adapter Firestore o demo in base alla config
+  config.js              env Firebase, controllo config, limiti prodotto (retention 30gg, offerte 30min)
+  backend.js             unico backend: Cloud Firestore (null se manca la config)
+  main.jsx               bootstrap: SetupScreen se manca la config, altrimenti Router + AuthProvider
+  App.jsx                route e guardie di autenticazione
   auth/AuthProvider.jsx  sessione Google + bootstrap profilo
   store/
-    base.js              interfaccia comune dello store
+    base.js              interfaccia comune dello store, filtri, ordinamenti
     firestoreAdapter.js  adapter Firestore (onSnapshot, transazioni, serverTimestamp)
-    localAdapter.js      adapter demo su localStorage, stessa semantica
   services/
     profiles.js          profilo, nickname, verifica identità, ruoli
     matches.js           match, iscrizioni, lista riserve, offerte 30 min
@@ -104,14 +108,17 @@ src/
     reputation.js        liste affidabili per organizzatore, valutazioni
     moderation.js        parole vietate, segnalazioni, ban, mute
     maintenance.js       pulizia chat e pubblicazione match ricorrenti
-  components/            shell, chat, card match, UI kit, countdown, emoji picker
+  components/            shell, chat, card match, UI kit, countdown, emoji picker,
+                         Logo, SetupScreen
   pages/                 Login, Home, Match, Gruppi, Chat, Profilo, Admin, Organizer
+  lib/                   formattazione date, hook, hashing inviti
 worker/
   src/index.js           cron: offerte riserve scadute, pulizia 30gg, match ricorrenti
   src/firestore.js       client Firestore REST con service account (JWT RS256)
 firestore.rules          regole di sicurezza
 firestore.indexes.json   indici compositi
 firebase.json            config CLI Firebase
+wrangler.jsonc           hosting della SPA su Cloudflare Workers
 ```
 
 ---
@@ -141,7 +148,7 @@ successiva; anche il client, al primo render, liquida le offerte già scadute.
 - filtro parole vietate applicato lato client prima dell'invio (la lista è gestita dall'admin);
   ban, silenziamento e cancellazione restano garantiti dalle regole Firestore, non dal client;
 - segnalazione messaggio → coda admin;
-- retention 30 giorni applicata dal Worker (e da `maintenance.js` in demo).
+- retention 30 giorni applicata dal Worker.
 
 ### Reputazione
 
@@ -152,7 +159,7 @@ pubblico, le contestazioni sono visibili solo all'organizzatore e all'admin.
 ### Match ricorrenti
 
 `recurringMatches/{id}` descrive giorno, ora, offset settimanale e template del match.
-Il cron delle 05:xx UTC crea il match della settimana se non esiste, con `sourceRecurringId`.
+Il cron crea il match della settimana se non esiste, con `sourceRecurringId`.
 Dalla pagina **Organizza** si attiva/disattiva la ricorrenza.
 
 ---
@@ -180,20 +187,20 @@ Deploy e test:
 
 ```bash
 npx wrangler deploy
-curl -X POST https://volley-bologna-cron.<account>.workers.dev/run \
-  -H "Authorization: Bearer $MAINTENANCE_SECRET"
+curl "https://volley-bologna-cron.<account>.workers.dev/run?key=$MAINTENANCE_SECRET" -X POST
 ```
 
-Trigger configurati (`worker/wrangler.toml`):
+C'è **un solo trigger**, ogni 10 minuti; le tre manutenzioni sono distribuite per ora di Roma
+dentro lo stesso giro:
 
 | Cron (UTC) | Azione |
 | --- | --- |
 | `*/10 * * * *` | offerte riserve scadute → passa alla riserva successiva |
-| `0 3 * * *` | pulizia messaggi chat più vecchi di 30 giorni |
-| `0 5 * * *` | pubblicazione dei match ricorrenti della settimana |
+| `*/10 * * * *`, fascia 03:xx Roma | pulizia messaggi chat più vecchi di 30 giorni |
+| `*/10 * * * *`, fascia 05:xx Roma | pubblicazione dei match ricorrenti della settimana |
 
-Endpoint manuali: `POST /run` (tutte le manutenzioni), `POST /expire-offers`, `POST /purge-chat`,
-`POST /publish-recurring`, `GET /health`.
+Endpoint manuali: `GET /health`, `POST /run?key=…` (tutte le manutenzioni, `force`).
+`GET /` restituisce la descrizione del servizio.
 
 ---
 
@@ -240,22 +247,39 @@ mirati per evitare scansioni complete.
 ## 8. Comandi
 
 ```bash
-npm run dev            # dev server Vite (demo se mancano le env)
+npm run dev            # dev server Vite
 npm run build          # build di produzione in dist/
 npm run preview        # anteprima della build
 npm run worker:dev     # wrangler dev per il worker cron
 npm run worker:deploy  # deploy del worker
 ```
 
-## 9. Checklist di collaudo
+---
 
-- [x] Login demo con i quattro profili, logout e persistenza della sessione
-- [x] Match: creazione, iscrizione, match pieno → lista riserva
-- [x] Ritiro di un iscritto → offerta alla prima riserva con countdown 30 min
-- [x] Conferma offerta → posto assegnato, oppure scadenza → riserva successiva
-- [x] Chat: invio, risposta, modifica con etichetta *Modificato*, eliminazione soft
-- [x] Segnalazione messaggio e parola vietata
-- [x] Gruppi pubblici/privati, richiesta di accesso, accesso negato per i bannati
-- [x] Reputazione: utente affidabile evidenziato in verde
-- [x] Admin: statistiche, segnalazioni, parole vietate, ban/silenzia, verifica identità
-- [ ] Da verificare con un progetto Firebase reale: regole, indici e cron in produzione
+## 9. Logo
+
+Il logo della community è in [public/logo.svg](public/logo.svg) e viene usato in sidebar, login,
+splash, hero della home e come favicon.
+
+Per usare un'immagine diversa (per esempio il PNG originale):
+
+1. salva il file in `public/logo.png`;
+2. imposta in `.env.local` (e nelle env di build su Cloudflare) `VITE_LOGO_URL=/logo.png`;
+3. riavvia il dev server o rifai il build.
+
+---
+
+## 10. Collaudo
+
+Con un progetto Firebase reale:
+
+- [ ] Login Google, logout e persistenza della sessione
+- [ ] Creazione del profilo al primo accesso (`users` + `publicProfiles`)
+- [ ] Match: creazione, iscrizione, match pieno → lista riserva
+- [ ] Ritiro di un iscritto → offerta alla prima riserva con countdown 30 min
+- [ ] Conferma offerta → posto assegnato, oppure scadenza → riserva successiva
+- [ ] Chat: invio, risposta, modifica con etichetta *Modificato*, eliminazione soft
+- [ ] Segnalazione messaggio e parola vietata
+- [ ] Gruppi pubblici/privati, richiesta di accesso, accesso negato per i bannati
+- [ ] Promozione del primo admin e dashboard di amministrazione
+- [ ] Cron del worker in produzione

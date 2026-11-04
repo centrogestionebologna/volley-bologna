@@ -84,11 +84,6 @@ export function AuthProvider({ children }) {
     }
   }, []);
 
-  const signInDemo = useCallback(async (uid) => {
-    setError('');
-    await auth.signInDemo(uid);
-  }, []);
-
   const signOut = useCallback(async () => {
     await auth.signOut();
   }, []);
@@ -107,18 +102,16 @@ export function AuthProvider({ children }) {
       loading,
       error,
       isAdmin: admin,
-      isDemo: auth.mode === 'demo',
       isBanned: Boolean(profile?.banned),
       isSilenced: Boolean(silencedUntil && silencedUntil.getTime() > Date.now()),
       silencedUntil,
       offers,
       signIn,
-      signInDemo,
       signOut,
       refresh,
       clearError: () => setError(''),
     };
-  }, [fbUser, profile, loading, error, admin, offers, silencedUntil, signIn, signInDemo, signOut, refresh]);
+  }, [fbUser, profile, loading, error, admin, offers, silencedUntil, signIn, signOut, refresh]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

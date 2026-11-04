@@ -1,16 +1,12 @@
-import { firebaseConfig, demoMode } from './config';
-import { createLocalBackend } from './store/localAdapter';
+import { firebaseConfig, isFirebaseConfigured } from './config';
+import { createFirestoreBackend } from './store/firestoreAdapter';
 
-let backend;
+/**
+ * Unico backend dell'app: Cloud Firestore.
+ * Se la configurazione manca, main.jsx mostra la schermata di setup e non monta l'app.
+ */
+const backend = isFirebaseConfigured ? createFirestoreBackend(firebaseConfig) : null;
 
-if (demoMode) {
-  backend = createLocalBackend();
-} else {
-  // Firebase viene caricato solo quando serve: la modalità demo resta leggerissima.
-  const { createFirestoreBackend } = await import('./store/firestoreAdapter');
-  backend = createFirestoreBackend(firebaseConfig);
-}
-
-export const store = backend.store;
-export const auth = backend.auth;
-export const isDemo = demoMode;
+export const store = backend?.store ?? null;
+export const auth = backend?.auth ?? null;
+export const isConfigured = isFirebaseConfigured;

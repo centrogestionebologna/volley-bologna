@@ -4,10 +4,14 @@ import { BrowserRouter } from 'react-router-dom';
 import App from './App';
 import { AuthProvider } from './auth/AuthProvider';
 import { ToastProvider } from './components/Toast';
+import { SetupScreen } from './components/SetupScreen';
+import { isFirebaseConfigured } from './config';
 import './styles.css';
 
-createRoot(document.getElementById('root')).render(
-  <StrictMode>
+function Root() {
+  if (!isFirebaseConfigured) return <SetupScreen />;
+
+  return (
     <BrowserRouter>
       <AuthProvider>
         <ToastProvider>
@@ -15,5 +19,11 @@ createRoot(document.getElementById('root')).render(
         </ToastProvider>
       </AuthProvider>
     </BrowserRouter>
+  );
+}
+
+createRoot(document.getElementById('root')).render(
+  <StrictMode>
+    <Root />
   </StrictMode>
 );

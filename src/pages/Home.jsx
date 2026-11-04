@@ -10,6 +10,7 @@ import {
   Users,
 } from 'lucide-react';
 import { useAuth } from '../auth/AuthProvider';
+import { LOGO_URL } from '../config';
 import { store } from '../backend';
 import { useAsync, useSubscription } from '../lib/hooks';
 import { MatchCard } from '../components/MatchCard';
@@ -19,7 +20,7 @@ import { listMyRegistrations } from '../services/matches';
 import { generalChatPath, subscribeMessages } from '../services/chat';
 
 export function Home() {
-  const { uid, nickname, isDemo, isAdmin, profile } = useAuth();
+  const { uid, nickname, profile } = useAuth();
 
   const matchesState = useSubscription(
     (cb) =>
@@ -78,14 +79,8 @@ export function Home() {
             </Link>
           ) : null}
         </div>
-        <div className="home-hero-art" aria-hidden>
-          <span className="hero-ball">🏐</span>
-          <span className="hero-ring hero-ring-1" />
-          <span className="hero-ring hero-ring-2" />
-          <span className="hero-badge">
-            <strong>30′</strong>
-            <small>per confermare la riserva</small>
-          </span>
+        <div className="home-hero-art">
+          <img src={LOGO_URL} alt="Volley Bologna Community" className="hero-logo" />
         </div>
       </section>
 
@@ -210,23 +205,6 @@ export function Home() {
               ))}
             </ul>
           </section>
-
-          {isDemo ? (
-            <section className="card card-pad demo-tips">
-              <h2>
-                <Sparkles size={18} /> Prova la demo
-              </h2>
-              <p className="small">
-                Cambia account dal profilo per vedere ruoli diversi. Marco ha un posto riservato in
-                scadenza al Talon; Giulia gestisce le riserve; Adriano modera.
-              </p>
-              {isAdmin ? (
-                <Link to="/admin" className="btn btn-ghost btn-sm btn-block">
-                  Apri amministrazione
-                </Link>
-              ) : null}
-            </section>
-          ) : null}
         </aside>
       </div>
     </div>
