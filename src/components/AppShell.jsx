@@ -7,8 +7,10 @@ import {
   MessageCircle,
   Shield,
   ShieldAlert,
+  Sparkles,
   UserRound,
   Users,
+  Volleyball,
 } from 'lucide-react';
 import { useAuth } from '../auth/AuthProvider';
 import { Avatar, Chip } from './ui';
