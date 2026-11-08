@@ -64,7 +64,7 @@ solo a chi è già admin:
 4. campi consigliati: `uid` (string), `name` (string), `createdAt` (timestamp); basta comunque che il documento esista;
 5. ricarica l'app: compare la voce **Amministrazione** nella sidebar.
 
-Da quel momento i ruoli si gestiscono dalla dashboard (Impostazioni → *Promuovi admin*).
+Da quel momento i ruoli si gestiscono dalla dashboard (**Utenti → Admin**; su mobile si apre da **Profilo → Admin**).
 
 ---
 
