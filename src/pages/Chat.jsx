@@ -1,4 +1,5 @@
 import { MessageCircle, ShieldCheck, Timer } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '../auth/AuthProvider';
 import { ChatRoom } from '../components/ChatRoom';
 import { Chip, PageHead } from '../components/ui';
@@ -7,6 +8,7 @@ import { LIMITS } from '../config';
 
 export function Chat() {
   const { uid, nickname, profile, isAdmin, isBanned, isSilenced } = useAuth();
+  const [searchParams] = useSearchParams();
 
   return (
     <div className="page chat-page">
@@ -40,6 +42,7 @@ export function Chat() {
             currentUser={{ uid, nickname: profile?.nickname || nickname }}
             canWrite={!isBanned && !isSilenced}
             isModerator={isAdmin}
+            autoFocus={searchParams.get('focus') === '1'}
             disabledReason={
               isBanned
                 ? 'Il tuo account è sospeso: non puoi scrivere in chat.'

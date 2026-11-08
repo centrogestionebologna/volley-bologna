@@ -1,24 +1,17 @@
-import { useEffect, useMemo, useState } from 'react';
-import { NavLink } from 'react-router-dom';
-import { ChevronDown, Home, Loader2, Send, Users } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Link, NavLink } from 'react-router-dom';
+import { Home, MessageCircle, Users } from 'lucide-react';
 import { useAuth } from '../auth/AuthProvider';
 import { store } from '../backend';
 import { useSubscription } from '../lib/hooks';
-import { LIMITS } from '../config';
-import { generalChatPath, groupChatPath, sendMessage } from '../services/chat';
-import { subscribeModerationSettings } from '../services/moderation';
-import { useToast } from './Toast';
+import { GroupWheel } from './GroupWheel';
 
 export function QuickComposer() {
-  const { uid, nickname, profile, isBanned, isSilenced } = useAuth();
-  const toast = useToast();
+  const { uid } = useAuth();
   const [target, setTarget] = useState('general');
   const [targets, setTargets] = useState([]);
-  const [text, setText] = useState('');
-  const [sending, setSending] = useState(false);
-
-  const settings = useSubscription((cb) => subscribeModerationSettings(cb), []);
-  const bannedWords = settings.data?.bannedWords || [];
+  const [wheelOpen, setWheelOpen] = useState(false);
+  const dockRef = useRef(null);
 
   const groupsState = useSubscription(
     (cb) => store.subscribeList('groups', { orderBy: [['name', 'asc']], limit: 50 }, cb),
@@ -57,102 +50,82 @@ export function QuickComposer() {
     if (target !== 'general' && !targets.some((group) => group.id === target)) {
       setTarget('general');
     }
+    if (targets.length === 0) setWheelOpen(false);
   }, [target, targets]);
 
-  const selectedGroup = useMemo(
-    () => targets.find((group) => group.id === target) || null,
-    [target, targets]
-  );
-  const targetLabel = target === 'general' ? 'Generale' : selectedGroup?.name || 'Gruppo';
-  const chatLabel = target === 'general' ? '#generale' : targetLabel;
-  const canWrite = !isBanned && !isSilenced;
+  useEffect(() => {
+    if (!wheelOpen) return undefined;
+    const onPointerDown = (event) => {
+      if (dockRef.current && !dockRef.current.contains(event.target)) setWheelOpen(false);
+    };
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape') setWheelOpen(false);
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [wheelOpen]);
 
-  const submit = async (event) => {
-    event.preventDefault();
-    const value = text.trim();
-    if (!value || !canWrite || sending || !uid) return;
-
-    setSending(true);
-    try {
-      await sendMessage({
-        path: target === 'general' ? generalChatPath : groupChatPath(target),
-        author: { uid, nickname: profile?.nickname || nickname },
-        text: value,
-        bannedWords,
-      });
-      setText('');
-      toast.success(`Messaggio inviato in ${chatLabel}.`);
-    } catch (error) {
-      toast.error(error.message || 'Impossibile inviare il messaggio.');
-    } finally {
-      setSending(false);
-    }
-  };
-
-  const placeholder = !canWrite
-    ? isBanned
-      ? 'Account sospeso: non puoi scrivere'
-      : 'Sei in silenzio temporaneo'
-    : `Scrivi in ${chatLabel}…`;
+  const items = useMemo(() => [{ id: 'general', name: 'Generale' }, ...targets], [targets]);
+  const targetLabel = items.find((item) => item.id === target)?.name || 'Generale';
+  const chatPath = target === 'general' ? '/chat?focus=1' : `/gruppi/${target}?focus=1`;
 
   return (
-    <nav className="bottom-nav" aria-label="Messaggio rapido">
-      <form className="quick-composer" onSubmit={submit}>
-        <div className={`quick-field ${canWrite ? '' : 'is-disabled'}`}>
-          <textarea
-            className="quick-input"
-            rows={1}
-            value={text}
-            maxLength={LIMITS.maxMessageLength}
-            placeholder={placeholder}
-            aria-label={placeholder}
-            disabled={!canWrite}
-            onChange={(event) => setText(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' && !event.shiftKey) {
-                event.preventDefault();
-                submit(event);
-              }
-            }}
-          />
-          <button
-            type="submit"
-            className="quick-send"
-            disabled={!canWrite || !text.trim() || sending}
-            aria-label="Invia messaggio"
-            title="Invia"
-          >
-            {sending ? <Loader2 size={17} className="spin" /> : <Send size={17} />}
-          </button>
-        </div>
+    <nav className="bottom-nav" aria-label="Chat rapida" ref={dockRef}>
+      <div className="quick-composer">
+        <Link
+          to={chatPath}
+          className="quick-launch"
+          onClick={() => setWheelOpen(false)}
+          aria-label={`Apri la chat in ${targetLabel}`}
+        >
+          <span className="quick-launch-icon">
+            <MessageCircle size={19} />
+          </span>
+          <span className="quick-launch-copy">
+            <strong>Scrivi in {target === 'general' ? '#generale' : targetLabel}</strong>
+            <small>Apri la chat</small>
+          </span>
+        </Link>
 
-        <label className="quick-target" title={`Destinazione: ${targetLabel}`}>
-          <Users size={15} aria-hidden />
-          <select
-            value={target}
-            onChange={(event) => setTarget(event.target.value)}
-            aria-label="Scegli dove scrivere"
+        {targets.length > 0 ? (
+          <button
+            type="button"
+            className={`quick-wheel-trigger ${wheelOpen ? 'active' : ''}`}
+            onClick={() => setWheelOpen((open) => !open)}
+            aria-label={`Scegli il gruppo, attuale ${targetLabel}`}
+            aria-expanded={wheelOpen}
+            title="Scegli il gruppo"
           >
-            <option value="general">Generale</option>
-            {targets.map((group) => (
-              <option key={group.id} value={group.id}>
-                {group.name}
-              </option>
-            ))}
-          </select>
-          <ChevronDown size={13} aria-hidden />
-        </label>
+            <Users size={17} />
+          </button>
+        ) : (
+          <span className="quick-wheel-empty" aria-hidden />
+        )}
 
         <NavLink
           to="/"
           end
           className={({ isActive }) => `quick-home ${isActive ? 'active' : ''}`}
+          onClick={() => setWheelOpen(false)}
           aria-label="Vai alla Home"
           title="Home"
         >
           <Home size={18} />
         </NavLink>
-      </form>
+      </div>
+
+      {wheelOpen && targets.length > 0 ? (
+        <GroupWheel
+          items={items}
+          target={target}
+          onSelect={setTarget}
+          onClose={() => setWheelOpen(false)}
+        />
+      ) : null}
     </nav>
   );
 }

@@ -355,6 +355,7 @@ export function GroupDetail() {
             currentUser={{ uid, nickname: profile?.nickname || nickname }}
             canWrite={canChat}
             isModerator={isOwner || isAdmin}
+            autoFocus={searchParams.get('focus') === '1'}
             disabledReason={
               isBanned
                 ? 'Il tuo account è sospeso: non puoi scrivere.'

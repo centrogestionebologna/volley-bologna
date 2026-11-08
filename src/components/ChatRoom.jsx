@@ -28,7 +28,7 @@ function dayLabel(value) {
   return formatDateShort(date);
 }
 
-export function ChatRoom({ path, currentUser, canWrite, disabledReason, isModerator = false }) {
+export function ChatRoom({ path, currentUser, canWrite, disabledReason, isModerator = false, autoFocus = false }) {
   const toast = useToast();
   const [live, setLive] = useState([]);
   const [older, setOlder] = useState([]);
@@ -45,6 +45,12 @@ export function ChatRoom({ path, currentUser, canWrite, disabledReason, isModera
   const bodyRef = useRef(null);
   const inputRef = useRef(null);
   const stickRef = useRef(true);
+
+  useEffect(() => {
+    if (!autoFocus || !canWrite) return undefined;
+    const frame = requestAnimationFrame(() => inputRef.current?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [autoFocus, canWrite, path]);
 
   const settings = useSubscription(
     (cb) => subscribeModerationSettings(cb),
