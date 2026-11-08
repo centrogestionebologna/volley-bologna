@@ -97,7 +97,6 @@ export async function savePublicData(uid, { bio, photoURL }) {
 export async function submitVerification(uid) {
   await store.updateDoc(privatePath(uid), {
     verificationStatus: 'submitted',
-    verificationNote: '',
     updatedAt: serverTimestamp(),
   });
 }

@@ -33,44 +33,71 @@ export async function getMembership(groupId, uid) {
 }
 
 export async function createGroup({ name, description = '', visibility, owner }) {
-  const cleanName = name.trim();
+  if (!owner?.uid) throw new Error('Sessione non valida: ricarica la pagina e riprova.');
+  const cleanName = String(name || '').trim();
   if (cleanName.length < 3) throw new Error('Il nome del gruppo deve avere almeno 3 caratteri.');
-  const groupId = await store.addDoc('groups', {
-    name: cleanName.slice(0, 80),
-    description: description.trim().slice(0, 400),
-    visibility: visibility === 'private' ? 'private' : 'public',
-    ownerId: owner.uid,
-    ownerNickname: owner.nickname,
-    memberCount: 1,
-    pendingCount: 0,
-    bannedUids: [],
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-  });
-
-  await store.setDoc(memberPath(groupId, owner.uid), {
-    uid: owner.uid,
-    nickname: owner.nickname,
-    role: 'owner',
-    status: 'active',
-    joinedAt: serverTimestamp(),
-  });
-
+  const isPrivate = visibility === 'private';
+  const ownerNickname = owner.nickname || 'Fondatore';
+  let groupId = null;
   let inviteCode = null;
-  if (visibility === 'private') {
-    inviteCode = generateInviteCode();
-    await store.setDoc(`groupSecrets/${groupId}`, {
+
+  try {
+    groupId = await store.addDoc('groups', {
+      name: cleanName.slice(0, 80),
+      description: String(description || '').trim().slice(0, 400),
+      visibility: isPrivate ? 'private' : 'public',
       ownerId: owner.uid,
-      inviteCode,
-      inviteHash: await sha256Hex(inviteCode),
+      ownerNickname,
+      memberCount: 1,
+      pendingCount: 0,
+      bannedUids: [],
+      createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
-  }
 
-  return { id: groupId, inviteCode };
+    // Per i gruppi privati il segreto deve esistere prima della membership:
+    // le regole verificano che l'invito del fondatore corrisponda al segreto.
+    let inviteHash = null;
+    if (isPrivate) {
+      inviteCode = generateInviteCode();
+      inviteHash = await sha256Hex(inviteCode);
+      await store.setDoc(`groupSecrets/${groupId}`, {
+        ownerId: owner.uid,
+        inviteCode,
+        inviteHash,
+        updatedAt: serverTimestamp(),
+      });
+    }
+
+    await store.setDoc(memberPath(groupId, owner.uid), {
+      uid: owner.uid,
+      nickname: ownerNickname,
+      role: 'owner',
+      status: 'active',
+      inviteHash,
+      joinedAt: serverTimestamp(),
+    });
+
+    return { id: groupId, inviteCode };
+  } catch (error) {
+    if (groupId) {
+      // Se una delle scritture fallisce, non lasciamo un gruppo senza fondatore.
+      try {
+        await store.deleteDoc(`groupSecrets/${groupId}`);
+      } catch {}
+      try {
+        await store.deleteDoc(memberPath(groupId, owner.uid));
+      } catch {}
+      try {
+        await store.deleteDoc(`groups/${groupId}`);
+      } catch {}
+    }
+    throw error;
+  }
 }
 
 export async function joinGroup({ groupId, user, inviteCode = '' }) {
+  const invite = String(inviteCode || '').trim();
   return store.runTransaction(async (tx) => {
     const groupDoc = await tx.get(`groups/${groupId}`);
     if (!groupDoc) throw new Error('Gruppo non trovato.');
@@ -80,11 +107,12 @@ export async function joinGroup({ groupId, user, inviteCode = '' }) {
     }
     const existing = await tx.get(memberPath(groupId, user.uid));
     if (existing?.data?.status === 'active') return 'active';
+    if (existing?.data?.status === 'pending' && !invite) return 'pending';
 
     let status = group.visibility === 'private' ? 'pending' : 'active';
     let inviteHash = null;
-    if (inviteCode.trim()) {
-      inviteHash = await sha256Hex(inviteCode.trim());
+    if (invite) {
+      inviteHash = await sha256Hex(invite);
       status = 'active';
     }
 

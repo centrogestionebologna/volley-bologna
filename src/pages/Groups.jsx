@@ -40,7 +40,11 @@ export function Groups() {
       setVisibility('public');
       navigate(`/gruppi/${result.id}`);
     } catch (error) {
-      toast.error(error.message);
+      toast.error(
+        error?.code === 'permission-denied'
+          ? 'Permessi Firestore negati: pubblica le regole aggiornate e riprova.'
+          : error.message
+      );
     } finally {
       setBusy(false);
     }

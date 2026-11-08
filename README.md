@@ -58,9 +58,11 @@ Il primo amministratore va creato a mano, perché le regole consentono di scrive
 solo a chi è già admin:
 
 1. accedi una volta con Google: l'app crea automaticamente `users/{uid}` e `publicProfiles/{uid}`;
-2. apri Firebase Console → Firestore → collezione `admins` → documento con **ID = uid dell'utente**;
-3. campi consigliati: `uid` (string), `name` (string), `createdAt` (timestamp);
-4. ricarica l'app: compare la voce **Amministrazione** nella sidebar.
+2. apri **Profilo** e premi **Copia ID** (è il tuo UID);
+3. apri Firebase Console → Firestore → collezione `admins` → **Aggiungi documento** con **ID = UID**;
+   nel progetto attuale: [console Firestore → admins](https://console.firebase.google.com/project/volley-bologna/firestore/data/~2Fadmins);
+4. campi consigliati: `uid` (string), `name` (string), `createdAt` (timestamp); basta comunque che il documento esista;
+5. ricarica l'app: compare la voce **Amministrazione** nella sidebar.
 
 Da quel momento i ruoli si gestiscono dalla dashboard (Impostazioni → *Promuovi admin*).
 
