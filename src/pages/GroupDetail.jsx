@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
   ArrowLeft,
   Ban,
   Check,
+  ChevronLeft,
   Copy,
   Link2,
   Lock,
@@ -40,6 +41,7 @@ export function GroupDetail() {
   const { groupId } = useParams();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const toast = useToast();
   const { uid, nickname, isAdmin, isBanned, isSilenced, profile } = useAuth();
 
@@ -57,8 +59,11 @@ export function GroupDetail() {
   const isBannedHere = Boolean(group && (group.bannedUids || []).includes(uid));
   const isMember = membership?.status === 'active';
   const isPending = membership?.status === 'pending';
+  const focusRequested = searchParams.get('focus') === '1';
+  const focused = focusRequested && isMember && !isBannedHere;
+  const focusRequest = location.state?.focusRequest;
 
-  const [tab, setTab] = useState('chat');
+  const [tab, setTab] = useState(() => (searchParams.get('tab') === 'membri' ? 'members' : 'chat'));
   const [busy, setBusy] = useState('');
   const [code, setCode] = useState('');
   const [showBanModal, setShowBanModal] = useState(false);
@@ -70,6 +75,15 @@ export function GroupDetail() {
     [groupId, isOwner]
   );
   const inviteCode = secret.data?.data?.inviteCode || '';
+
+  useEffect(() => {
+    if (!focusRequested || groupState.loading || membershipState.loading) return;
+    if (!isMember || isBannedHere) navigate(`/gruppi/${groupId}`, { replace: true });
+  }, [focusRequested, groupState.loading, membershipState.loading, isMember, isBannedHere, groupId, navigate]);
+
+  useEffect(() => {
+    if (searchParams.get('tab') === 'membri') setTab('members');
+  }, [searchParams]);
 
   useEffect(() => {
     const invite = searchParams.get('invite');
@@ -227,6 +241,48 @@ export function GroupDetail() {
         : { tone: 'muted', label: 'Non iscritto' };
 
   const canChat = isMember && !isBannedHere && !isBanned && !isSilenced;
+
+  if (focused) {
+    return (
+      <div className="page chat-page chat-page--full">
+        <section className="card chat-card chat-card--full">
+          <header className="chat-head chat-head--compact">
+            <Link to={`/gruppi/${groupId}?tab=membri`} className="chat-head-back" aria-label="Torna al gruppo">
+              <ChevronLeft size={22} />
+            </Link>
+            <span className={`group-icon ${group.visibility === 'private' ? 'private' : ''}`}>
+              {group.visibility === 'private' ? <Lock size={19} /> : <Users size={19} />}
+            </span>
+            <div className="chat-head-title">
+              <strong>{group.name}</strong>
+              <small>
+                {activeMembers.length} membri · {group.visibility === 'private' ? 'privato' : 'pubblico'}
+              </small>
+            </div>
+            <Link to={`/gruppi/${groupId}?tab=membri`} className="chat-head-action" aria-label="Apri i dettagli del gruppo">
+              <Users size={16} />
+              <span>Dettagli</span>
+            </Link>
+          </header>
+          <ChatRoom
+            path={groupChatPath(groupId)}
+            currentUser={{ uid, nickname: profile?.nickname || nickname }}
+            canWrite={canChat}
+            isModerator={isOwner || isAdmin}
+            autoFocus={focusRequested}
+            focusRequest={focusRequest}
+            disabledReason={
+              isBanned
+                ? 'Il tuo account è sospeso: non puoi scrivere.'
+                : isSilenced
+                  ? 'Sei in silenzio temporaneo: potrai tornare a scrivere più tardi.'
+                  : 'Non puoi scrivere in questa chat.'
+            }
+          />
+        </section>
+      </div>
+    );
+  }
 
   return (
     <div className="page">

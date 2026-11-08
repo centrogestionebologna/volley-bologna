@@ -1,4 +1,5 @@
-import { NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { useEffect } from 'react';
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
   CalendarDays,
   ChevronRight,
@@ -29,10 +30,49 @@ const NAV = [
 export function AppShell() {
   const { nickname, profile, isAdmin, isBanned, offers, signOut, user } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const nextOffer = offers?.[0];
+  const isChatMode =
+    location.pathname === '/chat' ||
+    (/^\/gruppi\/[^/]+$/.test(location.pathname) &&
+      new URLSearchParams(location.search).get('focus') === '1');
+
+  useEffect(() => {
+    const viewport = window.visualViewport;
+    const root = document.documentElement;
+
+    const updateViewport = () => {
+      const height = viewport?.height || window.innerHeight;
+      const offsetTop = viewport?.offsetTop || 0;
+      const keyboardInset = Math.max(0, window.innerHeight - height - offsetTop);
+
+      root.style.setProperty('--app-vh', `${Math.round(height)}px`);
+      root.style.setProperty('--vv-offset', `${Math.round(offsetTop)}px`);
+      root.style.setProperty('--kb-inset', `${Math.round(keyboardInset)}px`);
+      root.classList.toggle('keyboard-open', keyboardInset > 120);
+    };
+
+    updateViewport();
+    viewport?.addEventListener('resize', updateViewport);
+    viewport?.addEventListener('scroll', updateViewport);
+    window.addEventListener('resize', updateViewport);
+
+    return () => {
+      viewport?.removeEventListener('resize', updateViewport);
+      viewport?.removeEventListener('scroll', updateViewport);
+      window.removeEventListener('resize', updateViewport);
+      root.classList.remove('keyboard-open');
+    };
+  }, []);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    root.classList.toggle('chat-mode-active', isChatMode);
+    return () => root.classList.remove('chat-mode-active');
+  }, [isChatMode]);
 
   return (
-    <div className="app">
+    <div className={`app ${isChatMode ? 'chat-mode' : ''}`}>
       <aside className="sidebar">
         <NavLink to="/" className="brand">
           <span className="brand-mark">

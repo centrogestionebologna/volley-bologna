@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link, NavLink } from 'react-router-dom';
+import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { Home, MessageCircle, Users } from 'lucide-react';
 import { useAuth } from '../auth/AuthProvider';
 import { store } from '../backend';
@@ -8,7 +8,10 @@ import { GroupWheel } from './GroupWheel';
 
 export function QuickComposer() {
   const { uid } = useAuth();
-  const [target, setTarget] = useState('general');
+  const location = useLocation();
+  const navigate = useNavigate();
+  const routeGroupId = location.pathname.match(/^\/gruppi\/([^/]+)$/)?.[1] || '';
+  const [target, setTarget] = useState(routeGroupId || 'general');
   const [targets, setTargets] = useState([]);
   const [wheelOpen, setWheelOpen] = useState(false);
   const dockRef = useRef(null);
@@ -73,13 +76,28 @@ export function QuickComposer() {
   const targetLabel = items.find((item) => item.id === target)?.name || 'Generale';
   const chatPath = target === 'general' ? '/chat?focus=1' : `/gruppi/${target}?focus=1`;
 
+  useEffect(() => {
+    const groupMatch = location.pathname.match(/^\/gruppi\/([^/]+)$/);
+    if (groupMatch && targets.some((group) => group.id === groupMatch[1])) {
+      setTarget(groupMatch[1]);
+    } else if (location.pathname === '/chat') {
+      setTarget('general');
+    }
+    setWheelOpen(false);
+  }, [location.pathname, targets]);
+
+  const openChat = () => {
+    setWheelOpen(false);
+    navigate(chatPath, { state: { focusRequest: Date.now() } });
+  };
+
   return (
     <nav className="bottom-nav" aria-label="Chat rapida" ref={dockRef}>
       <div className="quick-composer">
-        <Link
-          to={chatPath}
+        <button
+          type="button"
           className="quick-launch"
-          onClick={() => setWheelOpen(false)}
+          onClick={openChat}
           aria-label={`Apri la chat in ${targetLabel}`}
         >
           <span className="quick-launch-icon">
@@ -89,7 +107,7 @@ export function QuickComposer() {
             <strong>Scrivi in {target === 'general' ? '#generale' : targetLabel}</strong>
             <small>Apri la chat</small>
           </span>
-        </Link>
+        </button>
 
         {targets.length > 0 ? (
           <button

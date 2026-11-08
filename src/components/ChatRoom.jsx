@@ -28,7 +28,15 @@ function dayLabel(value) {
   return formatDateShort(date);
 }
 
-export function ChatRoom({ path, currentUser, canWrite, disabledReason, isModerator = false, autoFocus = false }) {
+export function ChatRoom({
+  path,
+  currentUser,
+  canWrite,
+  disabledReason,
+  isModerator = false,
+  autoFocus = false,
+  focusRequest = null,
+}) {
   const toast = useToast();
   const [live, setLive] = useState([]);
   const [older, setOlder] = useState([]);
@@ -47,10 +55,28 @@ export function ChatRoom({ path, currentUser, canWrite, disabledReason, isModera
   const stickRef = useRef(true);
 
   useEffect(() => {
-    if (!autoFocus || !canWrite) return undefined;
-    const frame = requestAnimationFrame(() => inputRef.current?.focus());
+    if ((!autoFocus && !focusRequest) || !canWrite) return undefined;
+    const frame = requestAnimationFrame(() => {
+      inputRef.current?.focus({ preventScroll: true });
+      const body = bodyRef.current;
+      if (body) body.scrollTop = body.scrollHeight;
+    });
     return () => cancelAnimationFrame(frame);
-  }, [autoFocus, canWrite, path]);
+  }, [autoFocus, canWrite, focusRequest, path]);
+
+  useEffect(() => {
+    const viewport = window.visualViewport;
+    if (!viewport) return undefined;
+    const onResize = () => {
+      if (!stickRef.current) return;
+      requestAnimationFrame(() => {
+        const body = bodyRef.current;
+        if (body) body.scrollTop = body.scrollHeight;
+      });
+    };
+    viewport.addEventListener('resize', onResize);
+    return () => viewport.removeEventListener('resize', onResize);
+  }, []);
 
   const settings = useSubscription(
     (cb) => subscribeModerationSettings(cb),
@@ -356,6 +382,13 @@ export function ChatRoom({ path, currentUser, canWrite, disabledReason, isModera
               value={text}
               maxLength={LIMITS.maxMessageLength}
               placeholder={editing ? 'Modifica il messaggio…' : 'Scrivi un messaggio…'}
+              onFocus={() => {
+                stickRef.current = true;
+                requestAnimationFrame(() => {
+                  const body = bodyRef.current;
+                  if (body) body.scrollTop = body.scrollHeight;
+                });
+              }}
               onChange={(event) => setText(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === 'Enter' && !event.shiftKey) {
