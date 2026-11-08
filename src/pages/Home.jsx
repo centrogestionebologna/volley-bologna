@@ -1,12 +1,12 @@
 import { Link } from 'react-router-dom';
 import {
   ArrowRight,
-  CalendarDays,
   ClipboardList,
   Flame,
   MessageCircle,
   Sparkles,
   Trophy,
+  UserRound,
   Users,
 } from 'lucide-react';
 import { useAuth } from '../auth/AuthProvider';
@@ -18,6 +18,51 @@ import { Avatar, Chip, EmptyState, Spinner } from '../components/ui';
 import { formatDateShort, formatRelative } from '../lib/format';
 import { listMyRegistrations } from '../services/matches';
 import { generalChatPath, subscribeMessages } from '../services/chat';
+
+const HOME_ACTIONS = [
+  {
+    key: 'match',
+    to: '/match',
+    icon: ClipboardList,
+    title: 'Trova un match',
+    text: 'Partite aperte a Bologna',
+  },
+  {
+    key: 'organizza',
+    to: '/match/nuovo',
+    icon: Sparkles,
+    title: 'Organizza',
+    text: 'Pubblica una nuova partita',
+  },
+  {
+    key: 'impegni',
+    href: '#impegni',
+    icon: Trophy,
+    title: 'I tuoi impegni',
+    text: 'Iscrizioni e liste d’attesa',
+  },
+  {
+    key: 'chat',
+    to: '/chat',
+    icon: MessageCircle,
+    title: 'Chat generale',
+    text: 'Parla con la community',
+  },
+  {
+    key: 'gruppi',
+    to: '/gruppi',
+    icon: Users,
+    title: 'Gruppi',
+    text: 'Cerca o crea il tuo gruppo',
+  },
+  {
+    key: 'profilo',
+    to: '/profilo',
+    icon: UserRound,
+    title: 'Profilo',
+    text: 'Dati, verifica e impostazioni',
+  },
+];
 
 export function Home() {
   const { uid, nickname, profile } = useAuth();
@@ -64,14 +109,6 @@ export function Home() {
               ? `${matches.length} match aperti a Bologna e dintorni. Il prossimo è ${next?.data.title}.`
               : 'Nessun match aperto al momento: crea tu il prossimo!'}
           </p>
-          <div className="hero-actions">
-            <Link to="/match" className="btn btn-primary">
-              <CalendarDays size={17} /> Trova un match
-            </Link>
-            <Link to="/match/nuovo" className="btn btn-ghost">
-              <Sparkles size={17} /> Organizza
-            </Link>
-          </div>
           {profile && !profile.verified ? (
             <Link to="/profilo" className="hero-verify">
               <Trophy size={15} /> Completa il profilo e richiedi la verifica
@@ -81,6 +118,39 @@ export function Home() {
         </div>
         <div className="home-hero-art">
           <img src={LOGO_URL} alt="Volley Bologna Community" className="hero-logo" />
+        </div>
+      </section>
+
+      <section className="home-actions-section" aria-labelledby="home-actions-title">
+        <div className="section-head">
+          <h2 id="home-actions-title">Cosa vuoi fare?</h2>
+        </div>
+        <div className="home-actions">
+          {HOME_ACTIONS.map((action) => {
+            const Icon = action.icon;
+            const content = (
+              <>
+                <span className="home-action-icon">
+                  <Icon size={18} />
+                </span>
+                <span className="home-action-copy">
+                  <strong>{action.title}</strong>
+                  <small>{action.text}</small>
+                </span>
+                <ArrowRight size={15} className="home-action-arrow" />
+              </>
+            );
+
+            return action.href ? (
+              <a key={action.key} href={action.href} className="home-action">
+                {content}
+              </a>
+            ) : (
+              <Link key={action.key} to={action.to} className="home-action">
+                {content}
+              </Link>
+            );
+          })}
         </div>
       </section>
 
@@ -114,7 +184,7 @@ export function Home() {
             )}
           </section>
 
-          <section className="card card-pad">
+          <section id="impegni" className="card card-pad home-anchor">
             <div className="section-head">
               <h2>
                 <Flame size={18} /> I tuoi impegni

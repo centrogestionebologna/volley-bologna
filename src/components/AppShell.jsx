@@ -8,7 +8,6 @@ import {
   Shield,
   ShieldAlert,
   Sparkles,
-  UserRound,
   Users,
   Volleyball,
 } from 'lucide-react';
@@ -16,6 +15,7 @@ import { useAuth } from '../auth/AuthProvider';
 import { Avatar, Chip } from './ui';
 import { Logo } from './Logo';
 import { Countdown } from './Countdown';
+import { QuickComposer } from './QuickComposer';
 import { formatDateTime } from '../lib/format';
 
 const NAV = [
@@ -24,14 +24,6 @@ const NAV = [
   { to: '/gruppi', label: 'Gruppi', icon: Users },
   { to: '/chat', label: 'Chat', icon: MessageCircle },
   { to: '/organizzatore', label: 'Area organizer', icon: Sparkles },
-];
-
-const MOBILE_NAV = [
-  { to: '/', label: 'Home', icon: CalendarDays, end: true },
-  { to: '/match', label: 'Match', icon: ClipboardList },
-  { to: '/chat', label: 'Chat', icon: MessageCircle },
-  { to: '/gruppi', label: 'Gruppi', icon: Users },
-  { to: '/profilo', label: 'Profilo', icon: UserRound },
 ];
 
 export function AppShell() {
@@ -141,14 +133,7 @@ export function AppShell() {
         </main>
       </div>
 
-      <nav className="bottom-nav" aria-label="Navigazione mobile">
-        {MOBILE_NAV.map((item) => (
-          <NavLink key={item.to} to={item.to} end={item.end} className="bottom-item">
-            <item.icon size={20} />
-            <span>{item.label}</span>
-          </NavLink>
-        ))}
-      </nav>
+      <QuickComposer />
     </div>
   );
 }
