@@ -4,7 +4,6 @@ import {
   ArrowLeft,
   Ban,
   Check,
-  ChevronDown,
   ChevronLeft,
   Copy,
   Link2,
@@ -37,7 +36,6 @@ import { groupChatPath } from '../services/chat';
 import { Avatar, Chip, EmptyState, Modal, Spinner } from '../components/ui';
 import { ChatRoom } from '../components/ChatRoom';
 import { PrivateGroupGate } from '../components/PrivateGroupGate';
-import { useChatComposerDock } from '../components/ChatComposerDock';
 import { useToast } from '../components/Toast';
 import { formatDateShort } from '../lib/format';
 
@@ -47,7 +45,6 @@ export function GroupDetail() {
   const navigate = useNavigate();
   const location = useLocation();
   const toast = useToast();
-  const { requestGroupWheel } = useChatComposerDock();
   const { uid, nickname, isAdmin, isBanned, isSilenced, profile } = useAuth();
 
   const groupState = useSubscription((cb) => subscribeGroup(groupId, cb), [groupId]);
@@ -64,13 +61,13 @@ export function GroupDetail() {
   const isBannedHere = Boolean(group && (group.bannedUids || []).includes(uid));
   const isMember = membership?.status === 'active';
   const isPending = membership?.status === 'pending';
+  const infoOpen = searchParams.get('tab') === 'membri';
   const focusRequested =
     searchParams.get('focus') === '1' || searchParams.get('chat') === '1';
   const autoFocusRequested = searchParams.get('focus') === '1';
-  const focused = focusRequested && isMember && !isBannedHere;
+  const chatOpen = isMember && !isBannedHere && !infoOpen;
   const focusRequest = location.state?.focusRequest;
 
-  const [tab, setTab] = useState(() => (searchParams.get('tab') === 'membri' ? 'members' : 'chat'));
   const [busy, setBusy] = useState('');
   const [inviteBusy, setInviteBusy] = useState(() => Boolean(searchParams.get('invite')));
   const [showBanModal, setShowBanModal] = useState(false);
@@ -84,12 +81,13 @@ export function GroupDetail() {
   const inviteCode = secret.data?.data?.inviteCode || '';
 
   useEffect(() => {
-    if (searchParams.get('tab') === 'membri') setTab('members');
-  }, [searchParams]);
-
-  useEffect(() => {
     if (isMember) setInviteBusy(false);
   }, [isMember]);
+
+  useEffect(() => {
+    if (!isMember || isBannedHere || infoOpen || focusRequested) return;
+    navigate(`/gruppi/${groupId}?focus=1`, { replace: true });
+  }, [focusRequested, groupId, infoOpen, isBannedHere, isMember, navigate]);
 
   useEffect(() => {
     if (!isOwner || !inviteCode) return undefined;
@@ -301,36 +299,26 @@ export function GroupDetail() {
 
   const canChat = isMember && !isBannedHere && !isBanned && !isSilenced;
 
-  if (focused) {
+  if (chatOpen) {
     return (
       <div className="page chat-page chat-page--full">
         <section className="card chat-card chat-card--full">
           <header className="chat-head chat-head--compact">
-            <Link to={`/gruppi/${groupId}?tab=membri`} className="chat-head-back" aria-label="Torna al gruppo">
+            <Link to="/gruppi" className="chat-head-back" aria-label="Torna ai gruppi e scegli un'altra chat">
               <ChevronLeft size={22} />
             </Link>
             <span className={`group-icon ${group.visibility === 'private' ? 'private' : ''}`}>
               {group.visibility === 'private' ? <Lock size={19} /> : <Users size={19} />}
             </span>
             <div className="chat-head-title">
-              <strong>{group.name}</strong>
-              <small>
-                {activeMembers.length} membri · {group.visibility === 'private' ? 'privato' : 'pubblico'}
-              </small>
+              <Link
+                to={`/gruppi/${groupId}?tab=membri`}
+                className="chat-head-name"
+                title="Apri la descrizione del gruppo"
+              >
+                {group.name}
+              </Link>
             </div>
-            <button
-              type="button"
-              className="chat-head-switch"
-              onClick={requestGroupWheel}
-              aria-label="Scegli la chat"
-              title="Scegli la chat"
-            >
-              <ChevronDown size={16} />
-            </button>
-            <Link to={`/gruppi/${groupId}?tab=membri`} className="chat-head-action" aria-label="Apri i dettagli del gruppo">
-              <Users size={16} />
-              <span>Dettagli</span>
-            </Link>
           </header>
           <ChatRoom
             path={groupChatPath(groupId)}
@@ -355,9 +343,15 @@ export function GroupDetail() {
 
   return (
     <div className="page">
-      <Link to="/gruppi" className="back-link">
-        <ArrowLeft size={15} /> Tutti i gruppi
-      </Link>
+      {isMember ? (
+        <Link to={`/gruppi/${groupId}?focus=1`} className="back-link">
+          <ArrowLeft size={15} /> Torna alla chat
+        </Link>
+      ) : (
+        <Link to="/gruppi" className="back-link">
+          <ArrowLeft size={15} /> Tutti i gruppi
+        </Link>
+      )}
 
       <header className="group-header card">
         <div className="group-header-main">
@@ -451,40 +445,7 @@ export function GroupDetail() {
         </div>
       ) : null}
 
-      {isMember && !isBannedHere ? (
-        <div className="group-tabs">
-          <div className="segmented">
-            <button type="button" className={tab === 'chat' ? 'active' : ''} onClick={() => setTab('chat')}>
-              <MessageCircle size={15} /> Chat
-            </button>
-            <button type="button" className={tab === 'members' ? 'active' : ''} onClick={() => setTab('members')}>
-              <Users size={15} /> Membri ({activeMembers.length})
-              {isOwner && pendingMembers.length ? <span className="tab-dot">{pendingMembers.length}</span> : null}
-            </button>
-          </div>
-        </div>
-      ) : null}
-
-      {isMember && !isBannedHere && tab === 'chat' ? (
-        <section className="card chat-card">
-          <ChatRoom
-            path={groupChatPath(groupId)}
-            currentUser={{ uid, nickname: profile?.nickname || nickname }}
-            canWrite={canChat}
-            isModerator={isOwner || isAdmin}
-            composerLabel={group.name}
-            disabledReason={
-              isBanned
-                ? 'Il tuo account è sospeso: non puoi scrivere.'
-                : isSilenced
-                  ? 'Sei in silenzio temporaneo: potrai tornare a scrivere più tardi.'
-                  : 'Non puoi scrivere in questa chat.'
-            }
-          />
-        </section>
-      ) : null}
-
-      {isMember && !isBannedHere && tab === 'members' ? (
+      {isMember && !isBannedHere && infoOpen ? (
         <div className="detail-grid">
           <section className="card card-pad">
             <div className="section-head">

@@ -4177,8 +4177,21 @@ html.chat-mode-active body {
   white-space: nowrap;
 }
 
-.chat-head--compact .chat-head-title strong {
+.chat-head-name {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink);
+  font-weight: 700;
   font-size: 0.98rem;
+  line-height: 1.2;
+}
+
+.chat-head-name:hover {
+  color: var(--blue);
 }
 
 .chat-head--compact .chat-head-title small {
@@ -4438,7 +4451,8 @@ html.chat-mode-active body {
     height: 34px;
   }
 
-  .chat-head--compact .chat-head-title strong {
+  .chat-head--compact .chat-head-title strong,
+  .chat-head--compact .chat-head-name {
     font-size: 0.93rem;
   }
 
