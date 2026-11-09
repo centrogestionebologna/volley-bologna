@@ -1,13 +1,15 @@
-import { ChevronLeft, MessageCircle, Timer } from 'lucide-react';
+import { ChevronDown, ChevronLeft, MessageCircle, Timer } from 'lucide-react';
 import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../auth/AuthProvider';
 import { ChatRoom } from '../components/ChatRoom';
+import { useChatComposerDock } from '../components/ChatComposerDock';
 import { Chip } from '../components/ui';
 import { generalChatPath } from '../services/chat';
 import { LIMITS } from '../config';
 
 export function Chat() {
   const { uid, nickname, profile, isAdmin, isBanned, isSilenced } = useAuth();
+  const { requestGroupWheel } = useChatComposerDock();
   const [searchParams] = useSearchParams();
   const location = useLocation();
   const focusRequest = location.state?.focusRequest;
@@ -26,6 +28,15 @@ export function Chat() {
             <strong>#generale</strong>
             <small>Tutta la community · solo testo ed emoji</small>
           </div>
+          <button
+            type="button"
+            className="chat-head-switch"
+            onClick={requestGroupWheel}
+            aria-label="Scegli la chat"
+            title="Scegli la chat"
+          >
+            <ChevronDown size={16} />
+          </button>
           <div className="chat-head-meta">
             <Chip tone="blue" icon={Timer}>
               {LIMITS.messageRetentionDays} giorni

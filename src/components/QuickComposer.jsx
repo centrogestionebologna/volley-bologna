@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
-import { Home, Smile, Users } from 'lucide-react';
+import { Home, Smile } from 'lucide-react';
 import { useAuth } from '../auth/AuthProvider';
 import { store } from '../backend';
 import { useSubscription } from '../lib/hooks';
@@ -11,12 +11,13 @@ export function QuickComposer() {
   const { uid } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
-  const { active: composerActive, setSlot: setComposerSlot } = useChatComposerDock();
+  const { active: composerActive, setSlot: setComposerSlot, wheelRequest } = useChatComposerDock();
   const routeGroupId = location.pathname.match(/^\/gruppi\/([^/]+)$/)?.[1] || '';
   const [target, setTarget] = useState(routeGroupId || 'general');
   const [targets, setTargets] = useState([]);
   const [wheelOpen, setWheelOpen] = useState(false);
   const dockRef = useRef(null);
+  const navigateTimer = useRef(null);
 
   const groupsState = useSubscription(
     (cb) => store.subscribeList('groups', { orderBy: [['name', 'asc']], limit: 50 }, cb),
@@ -55,8 +56,15 @@ export function QuickComposer() {
     if (target !== 'general' && !targets.some((group) => group.id === target)) {
       setTarget('general');
     }
-    if (targets.length === 0) setWheelOpen(false);
   }, [target, targets]);
+
+  useEffect(() => {
+    if (wheelRequest > 0) setWheelOpen(true);
+  }, [wheelRequest]);
+
+  useEffect(() => () => {
+    if (navigateTimer.current) clearTimeout(navigateTimer.current);
+  }, []);
 
   useEffect(() => {
     if (!wheelOpen) return undefined;
@@ -95,7 +103,10 @@ export function QuickComposer() {
   const selectTarget = useCallback(
     (id) => {
       setTarget(id);
-      navigate(chatPathFor(id), { replace: true });
+      if (navigateTimer.current) clearTimeout(navigateTimer.current);
+      navigateTimer.current = setTimeout(() => {
+        navigate(chatPathFor(id), { replace: true });
+      }, 320);
     },
     [chatPathFor, navigate]
   );
@@ -129,21 +140,6 @@ export function QuickComposer() {
           </button>
         ) : null}
 
-        {targets.length > 0 ? (
-          <button
-            type="button"
-            className={`quick-wheel-trigger ${wheelOpen ? 'active' : ''}`}
-            onClick={() => setWheelOpen((open) => !open)}
-            aria-label={`Scegli il gruppo, attuale ${targetLabel}`}
-            aria-expanded={wheelOpen}
-            title="Scegli il gruppo"
-          >
-            <Users size={17} />
-          </button>
-        ) : (
-          <span className="quick-wheel-empty" aria-hidden />
-        )}
-
         <NavLink
           to="/"
           end
@@ -156,7 +152,7 @@ export function QuickComposer() {
         </NavLink>
       </div>
 
-      {wheelOpen && targets.length > 0 ? (
+      {wheelOpen ? (
         <GroupWheel
           items={items}
           target={target}

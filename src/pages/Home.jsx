@@ -11,10 +11,9 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../auth/AuthProvider';
 import { store } from '../backend';
-import { useAsync, useSubscription } from '../lib/hooks';
-import { MatchCard } from '../components/MatchCard';
+import { useAsync } from '../lib/hooks';
 import { Chip, EmptyState, Spinner } from '../components/ui';
-import { formatDateShort } from '../lib/format';
+import { formatDateShort, toDate } from '../lib/format';
 import { listMyRegistrations } from '../services/matches';
 
 const HOME_ACTIONS = [
@@ -29,17 +28,16 @@ const HOME_ACTIONS = [
 export function Home() {
   const { uid } = useAuth();
 
-  const matchesState = useSubscription(
-    (cb) =>
-      store.subscribeList(
-        'matches',
-        { where: [['status', '==', 'open']], orderBy: [['startsAt', 'asc']], limit: 20 },
-        cb
-      ),
+  const matchesState = useAsync(
+    () => store.listDocs('matches', { where: [['status', '==', 'open']], limit: 50 }),
     []
   );
-  const matches = matchesState.data || [];
-  const upcoming = matches.filter((row) => row.data.startsAt);
+  const upcoming = (matchesState.data || [])
+    .filter((row) => {
+      const start = toDate(row.data.startsAt);
+      return start && start.getTime() > Date.now();
+    })
+    .sort((a, b) => toDate(a.data.startsAt).getTime() - toDate(b.data.startsAt).getTime());
 
   const myRegs = useAsync(() => (uid ? listMyRegistrations(uid) : Promise.resolve([])), [uid]);
   const regMap = new Map((myRegs.data || []).map((row) => [row.match.id, row.reg]));
@@ -76,15 +74,17 @@ export function Home() {
         </div>
       </section>
 
-      <section>
+      <section className="card card-pad">
         <div className="section-head">
-          <h2>Prossimi match</h2>
+          <h2>
+            <ClipboardList size={18} /> Prossimi match
+          </h2>
           <Link to="/match" className="link-more">
             Vedi tutti <ArrowRight size={15} />
           </Link>
         </div>
         {matchesState.loading ? (
-          <Spinner />
+          <Spinner label="Caricamento match…" />
         ) : upcoming.length === 0 ? (
           <EmptyState
             icon={ClipboardList}
@@ -96,11 +96,44 @@ export function Home() {
             </Link>
           </EmptyState>
         ) : (
-          <div className="match-list">
-            {upcoming.slice(0, 4).map((row) => (
-              <MatchCard key={row.id} match={{ id: row.id, ...row.data }} myReg={regMap.get(row.id)} />
-            ))}
-          </div>
+          <ul className="compact-list home-match-list">
+            {upcoming.slice(0, 4).map((row) => {
+              const match = { id: row.id, ...row.data };
+              const myReg = regMap.get(match.id);
+              const full = (match.confirmedCount || 0) >= match.maxPlayers;
+              return (
+                <li key={match.id}>
+                  <Link to={`/match/${match.id}`} className="home-match-row">
+                    <div>
+                      <strong>{match.title}</strong>
+                      <small>
+                        {formatDateShort(match.startsAt)} · {match.time} · {match.gym}
+                      </small>
+                    </div>
+                    {myReg ? (
+                      <Chip
+                        tone={
+                          myReg.status === 'confirmed'
+                            ? 'green'
+                            : myReg.status === 'offered'
+                              ? 'amber'
+                              : 'blue'
+                        }
+                      >
+                        {myReg.status === 'confirmed'
+                          ? 'Iscritto'
+                          : myReg.status === 'offered'
+                            ? 'Conferma il posto'
+                            : 'In riserva'}
+                      </Chip>
+                    ) : (
+                      <Chip tone={full ? 'amber' : 'green'}>{full ? 'Pieno' : 'Posti liberi'}</Chip>
+                    )}
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
         )}
       </section>
 

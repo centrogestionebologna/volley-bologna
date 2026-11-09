@@ -4,6 +4,7 @@ import {
   ArrowLeft,
   Ban,
   Check,
+  ChevronDown,
   ChevronLeft,
   Copy,
   Link2,
@@ -34,6 +35,7 @@ import {
 import { groupChatPath } from '../services/chat';
 import { Avatar, Chip, EmptyState, Modal, Spinner } from '../components/ui';
 import { ChatRoom } from '../components/ChatRoom';
+import { useChatComposerDock } from '../components/ChatComposerDock';
 import { useToast } from '../components/Toast';
 import { formatDateShort } from '../lib/format';
 
@@ -43,6 +45,7 @@ export function GroupDetail() {
   const navigate = useNavigate();
   const location = useLocation();
   const toast = useToast();
+  const { requestGroupWheel } = useChatComposerDock();
   const { uid, nickname, isAdmin, isBanned, isSilenced, profile } = useAuth();
 
   const groupState = useSubscription((cb) => subscribeGroup(groupId, cb), [groupId]);
@@ -261,6 +264,15 @@ export function GroupDetail() {
                 {activeMembers.length} membri · {group.visibility === 'private' ? 'privato' : 'pubblico'}
               </small>
             </div>
+            <button
+              type="button"
+              className="chat-head-switch"
+              onClick={requestGroupWheel}
+              aria-label="Scegli la chat"
+              title="Scegli la chat"
+            >
+              <ChevronDown size={16} />
+            </button>
             <Link to={`/gruppi/${groupId}?tab=membri`} className="chat-head-action" aria-label="Apri i dettagli del gruppo">
               <Users size={16} />
               <span>Dettagli</span>

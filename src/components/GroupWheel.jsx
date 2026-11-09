@@ -95,24 +95,20 @@ export function GroupWheel({ items, target, onSelect, onClose }) {
 
       <div className="group-wheel-wrap">
         <div className="group-wheel-center" aria-hidden />
-        <div className="group-wheel" ref={wheelRef}>
+        <div className="group-wheel" ref={wheelRef} role="listbox" aria-label="Chat disponibili">
           {items.map((item) => (
-            <button
+            <div
               key={item.id}
               ref={(node) => {
                 itemRefs.current[item.id] = node;
               }}
-              type="button"
               className={`group-wheel-item ${target === item.id ? 'active' : ''}`}
-              onPointerEnter={() => select(item.id)}
-              onClick={() => {
-                select(item.id);
-                onClose();
-              }}
+              role="option"
+              aria-selected={target === item.id}
               title={item.name}
             >
               {item.name}
-            </button>
+            </div>
           ))}
         </div>
       </div>
