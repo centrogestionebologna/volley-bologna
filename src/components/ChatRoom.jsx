@@ -71,6 +71,7 @@ export function ChatRoom({
   const [reportTarget, setReportTarget] = useState(null);
   const [reportReason, setReportReason] = useState('');
   const [reportBusy, setReportBusy] = useState(false);
+  const [activeMessageId, setActiveMessageId] = useState(null);
   const bodyRef = useRef(null);
   const inputRef = useRef(null);
   const stickRef = useRef(true);
@@ -116,8 +117,21 @@ export function ChatRoom({
     setReplyTo(null);
     setEditing(null);
     setText('');
+    setActiveMessageId(null);
     return subscribeMessages(path, (rows) => setLive(rows));
   }, [path]);
+
+  useEffect(() => {
+    if (!activeMessageId) return undefined;
+
+    const onPointerDown = (event) => {
+      if (event.target?.closest?.('.msg.actions-open')) return;
+      setActiveMessageId(null);
+    };
+
+    document.addEventListener('pointerdown', onPointerDown);
+    return () => document.removeEventListener('pointerdown', onPointerDown);
+  }, [activeMessageId]);
 
   const messages = useMemo(() => {
     const seen = new Set();
@@ -163,12 +177,14 @@ export function ChatRoom({
   };
 
   const startReply = (message) => {
+    setActiveMessageId(null);
     setReplyTo(message);
     setEditing(null);
     inputRef.current?.focus();
   };
 
   const startEdit = (message) => {
+    setActiveMessageId(null);
     setEditing(message);
     setReplyTo(null);
     setText(message.text);
@@ -212,6 +228,7 @@ export function ChatRoom({
   };
 
   const remove = async (message) => {
+    setActiveMessageId(null);
     if (!window.confirm('Eliminare questo messaggio? Comparirà come “Questo messaggio è stato eliminato”.')) {
       return;
     }
@@ -262,6 +279,10 @@ export function ChatRoom({
       input.selectionStart = start + emoji.length;
       input.selectionEnd = start + emoji.length;
     });
+  };
+
+  const toggleMessageActions = (messageId) => {
+    setActiveMessageId((current) => (current === messageId ? null : messageId));
   };
 
   const composer = !canWrite ? (
@@ -383,11 +404,38 @@ export function ChatRoom({
           const own = message.authorId === currentUser.uid;
           const canEdit = own && !message.deleted;
           const canDelete = (own || isModerator) && !message.deleted;
+          const canReport = !own && !message.deleted;
+          const hasActions =
+            canDelete || (canWrite && !message.deleted) || canReport;
+          const actionsOpen = activeMessageId === message.id;
 
           return (
             <div key={message.id}>
               {showDay ? <div className="day-divider">{dayLabel(message.createdAt)}</div> : null}
-              <div className={`msg ${own ? 'own' : ''}`}>
+              <div
+                className={`msg ${own ? 'own' : ''} ${actionsOpen ? 'actions-open' : ''}`}
+                onClick={
+                  hasActions
+                    ? (event) => {
+                        event.stopPropagation();
+                        toggleMessageActions(message.id);
+                      }
+                    : undefined
+                }
+                onKeyDown={
+                  hasActions
+                    ? (event) => {
+                        if (event.target !== event.currentTarget) return;
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault();
+                          toggleMessageActions(message.id);
+                        }
+                      }
+                    : undefined
+                }
+                tabIndex={hasActions ? 0 : undefined}
+                aria-expanded={hasActions ? actionsOpen : undefined}
+              >
                 {!own ? <Avatar name={message.authorNickname} size="sm" /> : null}
                 <div className="msg-content">
                   {!own ? <span className="msg-author">{message.authorNickname}</span> : null}
@@ -408,7 +456,10 @@ export function ChatRoom({
                       <time>{formatTime(message.createdAt)}</time>
                     </div>
                   </div>
-                  <div className="msg-actions">
+                  <div
+                    className="msg-actions"
+                    onClick={(event) => event.stopPropagation()}
+                  >
                     {canWrite && !message.deleted ? (
                       <button type="button" onClick={() => startReply(message)} aria-label="Rispondi" title="Rispondi">
                         <Reply size={14} />
@@ -424,10 +475,11 @@ export function ChatRoom({
                         <Trash2 size={14} />
                       </button>
                     ) : null}
-                    {!own && !message.deleted ? (
+                    {canReport ? (
                       <button
                         type="button"
                         onClick={() => {
+                          setActiveMessageId(null);
                           setReportTarget(message);
                           setReportReason('');
                         }}

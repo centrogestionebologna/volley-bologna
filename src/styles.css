@@ -2197,15 +2197,19 @@ textarea {
 }
 
 .msg-actions {
-  display: flex;
+  display: none;
   gap: 1px;
-  opacity: 0;
-  transition: opacity 0.12s;
   align-self: center;
 }
 
-.msg:hover .msg-actions {
-  opacity: 1;
+.msg.actions-open .msg-actions {
+  display: flex;
+}
+
+.msg:focus-visible {
+  outline: 2px solid rgba(30, 91, 216, 0.55);
+  outline-offset: 4px;
+  border-radius: 12px;
 }
 
 .msg-actions button {
@@ -3308,11 +3312,15 @@ textarea {
     bottom: 0;
     left: 0;
     right: 0;
-    background: rgba(255, 255, 255, 0.98);
-    backdrop-filter: blur(10px);
-    border-top: 1px solid var(--line);
+    background: transparent;
+    border-top: 0;
     z-index: 30;
     padding: 7px 8px calc(7px + env(safe-area-inset-bottom));
+    pointer-events: none;
+  }
+
+  .bottom-nav > * {
+    pointer-events: auto;
   }
 
   .quick-composer {
@@ -3421,6 +3429,7 @@ textarea {
     border-radius: 14px;
     background: #fff;
     color: var(--ink);
+    box-shadow: 0 4px 16px -10px rgba(15, 30, 50, 0.3);
   }
 
   .quick-home.active {
@@ -4289,7 +4298,7 @@ html.chat-mode-active body {
     flex: 1;
     min-height: 0;
     max-width: none;
-    padding: 0 0 calc(66px + env(safe-area-inset-bottom));
+    padding: 0;
   }
 
   .chat-page--full {
@@ -4345,7 +4354,7 @@ html.chat-mode-active body {
   }
 
   .chat-page--full .chat-body {
-    padding: 10px 8px 8px;
+    padding: 10px 8px calc(60px + env(safe-area-inset-bottom));
   }
 
   .chat-page--full .chat-input {
@@ -4372,7 +4381,6 @@ html.chat-mode-active body {
 
   .chat-page--full .msg-actions {
     gap: 0;
-    opacity: 1;
   }
 
   .chat-page--full .msg-actions button {
@@ -4387,6 +4395,10 @@ html.chat-mode-active body {
   }
 
   .keyboard-open .app.chat-mode .content {
+    padding-bottom: 0;
+  }
+
+  .keyboard-open .chat-page--full .chat-body {
     padding-bottom: calc(50px + env(safe-area-inset-bottom));
   }
 
