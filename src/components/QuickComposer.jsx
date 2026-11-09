@@ -1,15 +1,17 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
-import { Home, MessageCircle, Users } from 'lucide-react';
+import { Home, Smile, Users } from 'lucide-react';
 import { useAuth } from '../auth/AuthProvider';
 import { store } from '../backend';
 import { useSubscription } from '../lib/hooks';
 import { GroupWheel } from './GroupWheel';
+import { useChatComposerDock } from './ChatComposerDock';
 
 export function QuickComposer() {
   const { uid } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
+  const { active: composerActive, setSlot: setComposerSlot } = useChatComposerDock();
   const routeGroupId = location.pathname.match(/^\/gruppi\/([^/]+)$/)?.[1] || '';
   const [target, setTarget] = useState(routeGroupId || 'general');
   const [targets, setTargets] = useState([]);
@@ -83,8 +85,20 @@ export function QuickComposer() {
     } else if (location.pathname === '/chat') {
       setTarget('general');
     }
-    setWheelOpen(false);
   }, [location.pathname, targets]);
+
+  const chatPathFor = useCallback(
+    (id) => (id === 'general' ? '/chat?chat=1' : `/gruppi/${id}?chat=1`),
+    []
+  );
+
+  const selectTarget = useCallback(
+    (id) => {
+      setTarget(id);
+      navigate(chatPathFor(id), { replace: true });
+    },
+    [chatPathFor, navigate]
+  );
 
   const openChat = () => {
     setWheelOpen(false);
@@ -94,20 +108,26 @@ export function QuickComposer() {
   return (
     <nav className="bottom-nav" aria-label="Chat rapida" ref={dockRef}>
       <div className="quick-composer">
-        <button
-          type="button"
-          className="quick-launch"
-          onClick={openChat}
-          aria-label={`Apri la chat in ${targetLabel}`}
-        >
-          <span className="quick-launch-icon">
-            <MessageCircle size={19} />
-          </span>
-          <span className="quick-launch-copy">
-            <strong>Scrivi in {target === 'general' ? '#generale' : targetLabel}</strong>
-            <small>Apri la chat</small>
-          </span>
-        </button>
+        <div
+          ref={setComposerSlot}
+          className={`quick-composer-slot ${composerActive ? 'active' : ''}`}
+        />
+        {!composerActive ? (
+          <button
+            type="button"
+            className="quick-launch"
+            onClick={openChat}
+            aria-label={`Apri la chat in ${targetLabel}`}
+          >
+            <span className="quick-launch-icon">
+              <Smile size={21} />
+            </span>
+            <span className="quick-launch-copy">
+              <strong>Scrivi in {target === 'general' ? '#generale' : targetLabel}</strong>
+              <small>Apri la chat</small>
+            </span>
+          </button>
+        ) : null}
 
         {targets.length > 0 ? (
           <button
@@ -140,7 +160,7 @@ export function QuickComposer() {
         <GroupWheel
           items={items}
           target={target}
-          onSelect={setTarget}
+          onSelect={selectTarget}
           onClose={() => setWheelOpen(false)}
         />
       ) : null}

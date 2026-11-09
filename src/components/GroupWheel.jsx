@@ -11,6 +11,12 @@ export function GroupWheel({ items, target, onSelect, onClose }) {
   const targetRef = useRef(target);
   targetRef.current = target;
 
+  const select = (id) => {
+    if (id === targetRef.current) return;
+    targetRef.current = id;
+    onSelect(id);
+  };
+
   useEffect(() => {
     const container = wheelRef.current;
     if (!container) return undefined;
@@ -44,11 +50,8 @@ export function GroupWheel({ items, target, onSelect, onClose }) {
         }
       }
 
-      if (closestId && closestId !== targetRef.current) {
-        targetRef.current = closestId;
-        onSelect(closestId);
-      }
-    };
+      if (closestId) select(closestId);
+    }
 
     const centerSelected = () => {
       const node = itemRefs.current[targetRef.current];
@@ -101,8 +104,9 @@ export function GroupWheel({ items, target, onSelect, onClose }) {
               }}
               type="button"
               className={`group-wheel-item ${target === item.id ? 'active' : ''}`}
+              onPointerEnter={() => select(item.id)}
               onClick={() => {
-                onSelect(item.id);
+                select(item.id);
                 onClose();
               }}
               title={item.name}

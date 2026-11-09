@@ -4,6 +4,7 @@ import { BrowserRouter } from 'react-router-dom';
 import App from './App';
 import { AuthProvider } from './auth/AuthProvider';
 import { ToastProvider } from './components/Toast';
+import { ChatComposerDockProvider } from './components/ChatComposerDock';
 import { SetupScreen } from './components/SetupScreen';
 import { isFirebaseConfigured } from './config';
 import './styles.css';
@@ -15,7 +16,9 @@ function Root() {
     <BrowserRouter>
       <AuthProvider>
         <ToastProvider>
-          <App />
+          <ChatComposerDockProvider>
+            <App />
+          </ChatComposerDockProvider>
         </ToastProvider>
       </AuthProvider>
     </BrowserRouter>

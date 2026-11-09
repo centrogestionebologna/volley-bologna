@@ -32,10 +32,11 @@ export function AppShell() {
   const navigate = useNavigate();
   const location = useLocation();
   const nextOffer = offers?.[0];
+  const chatQuery = new URLSearchParams(location.search);
   const isChatMode =
     location.pathname === '/chat' ||
     (/^\/gruppi\/[^/]+$/.test(location.pathname) &&
-      new URLSearchParams(location.search).get('focus') === '1');
+      (chatQuery.get('focus') === '1' || chatQuery.get('chat') === '1'));
 
   useEffect(() => {
     const viewport = window.visualViewport;

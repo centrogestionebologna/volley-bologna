@@ -59,7 +59,9 @@ export function GroupDetail() {
   const isBannedHere = Boolean(group && (group.bannedUids || []).includes(uid));
   const isMember = membership?.status === 'active';
   const isPending = membership?.status === 'pending';
-  const focusRequested = searchParams.get('focus') === '1';
+  const focusRequested =
+    searchParams.get('focus') === '1' || searchParams.get('chat') === '1';
+  const autoFocusRequested = searchParams.get('focus') === '1';
   const focused = focusRequested && isMember && !isBannedHere;
   const focusRequest = location.state?.focusRequest;
 
@@ -269,8 +271,9 @@ export function GroupDetail() {
             currentUser={{ uid, nickname: profile?.nickname || nickname }}
             canWrite={canChat}
             isModerator={isOwner || isAdmin}
-            autoFocus={focusRequested}
+            autoFocus={autoFocusRequested}
             focusRequest={focusRequest}
+            composerLabel={group.name}
             disabledReason={
               isBanned
                 ? 'Il tuo account è sospeso: non puoi scrivere.'
@@ -411,7 +414,7 @@ export function GroupDetail() {
             currentUser={{ uid, nickname: profile?.nickname || nickname }}
             canWrite={canChat}
             isModerator={isOwner || isAdmin}
-            autoFocus={searchParams.get('focus') === '1'}
+            composerLabel={group.name}
             disabledReason={
               isBanned
                 ? 'Il tuo account è sospeso: non puoi scrivere.'

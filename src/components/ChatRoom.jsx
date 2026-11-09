@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Flag, Loader2, Pencil, Reply, Send, Smile, Trash2, X } from 'lucide-react';
 import { Avatar, Modal } from './ui';
 import { EmojiPicker } from './EmojiPicker';
 import { useToast } from './Toast';
+import { useChatComposerDock } from './ChatComposerDock';
 import { useSubscription } from '../lib/hooks';
 import { formatDateShort, formatTime, toDate } from '../lib/format';
 import { LIMITS } from '../config';
@@ -14,6 +16,22 @@ import {
   subscribeMessages,
 } from '../services/chat';
 import { createReport, subscribeModerationSettings } from '../services/moderation';
+
+function useIsMobile() {
+  const [matches, setMatches] = useState(() =>
+    typeof window !== 'undefined' && window.matchMedia('(max-width: 980px)').matches
+  );
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+    const query = window.matchMedia('(max-width: 980px)');
+    const onChange = () => setMatches(query.matches);
+    query.addEventListener?.('change', onChange);
+    return () => query.removeEventListener?.('change', onChange);
+  }, []);
+
+  return matches;
+}
 
 function dayLabel(value) {
   const date = toDate(value);
@@ -36,8 +54,11 @@ export function ChatRoom({
   isModerator = false,
   autoFocus = false,
   focusRequest = null,
+  composerLabel = 'questa chat',
 }) {
   const toast = useToast();
+  const isMobile = useIsMobile();
+  const { slot: composerSlot, setActive: setComposerActive } = useChatComposerDock();
   const [live, setLive] = useState([]);
   const [older, setOlder] = useState([]);
   const [hasMore, setHasMore] = useState(true);
@@ -54,6 +75,11 @@ export function ChatRoom({
   const inputRef = useRef(null);
   const stickRef = useRef(true);
 
+  useLayoutEffect(() => {
+    setComposerActive(isMobile);
+    return () => setComposerActive(false);
+  }, [isMobile, setComposerActive]);
+
   useEffect(() => {
     if ((!autoFocus && !focusRequest) || !canWrite) return undefined;
     const frame = requestAnimationFrame(() => {
@@ -62,7 +88,7 @@ export function ChatRoom({
       if (body) body.scrollTop = body.scrollHeight;
     });
     return () => cancelAnimationFrame(frame);
-  }, [autoFocus, canWrite, focusRequest, path]);
+  }, [autoFocus, canWrite, focusRequest, path, composerSlot, isMobile]);
 
   useEffect(() => {
     const viewport = window.visualViewport;
@@ -238,6 +264,88 @@ export function ChatRoom({
     });
   };
 
+  const composer = !canWrite ? (
+    <div className="chat-disabled">{disabledReason || 'Non puoi scrivere in questa chat.'}</div>
+  ) : (
+    <form className="chat-input" onSubmit={submit} aria-label={`Scrivi in ${composerLabel}`}>
+      {replyTo ? (
+        <div className="composer-note reply">
+          <div>
+            <strong>Rispondi a {replyTo.authorNickname}</strong>
+            <span>{replyTo.deleted ? 'Messaggio eliminato' : replyTo.text.slice(0, 120)}</span>
+          </div>
+          <button type="button" className="icon-btn" onClick={cancelComposer} aria-label="Annulla risposta">
+            <X size={16} />
+          </button>
+        </div>
+      ) : null}
+      {editing ? (
+        <div className="composer-note edit">
+          <div>
+            <strong>Modifica messaggio</strong>
+            <span>{editing.text.slice(0, 120)}</span>
+          </div>
+          <button type="button" className="icon-btn" onClick={cancelComposer} aria-label="Annulla modifica">
+            <X size={16} />
+          </button>
+        </div>
+      ) : null}
+      <div className="composer-row">
+        <div className="emoji-anchor">
+          <button
+            type="button"
+            className="icon-btn"
+            onClick={() => setEmojiOpen((open) => !open)}
+            aria-label="Emoji"
+          >
+            <Smile size={20} />
+          </button>
+          {emojiOpen ? (
+            <EmojiPicker
+              onPick={(emoji) => {
+                addEmoji(emoji);
+              }}
+              onClose={() => setEmojiOpen(false)}
+            />
+          ) : null}
+        </div>
+        <textarea
+          ref={inputRef}
+          className="chat-textarea"
+          rows={1}
+          value={text}
+          maxLength={LIMITS.maxMessageLength}
+          placeholder={editing ? 'Modifica il messaggio…' : `Scrivi in ${composerLabel}`}
+          onFocus={() => {
+            stickRef.current = true;
+            requestAnimationFrame(() => {
+              const body = bodyRef.current;
+              if (body) body.scrollTop = body.scrollHeight;
+            });
+          }}
+          onChange={(event) => setText(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' && !event.shiftKey) {
+              event.preventDefault();
+              submit();
+            }
+          }}
+        />
+        <button
+          type="submit"
+          className="send-btn"
+          disabled={!text.trim() || sending}
+          aria-label="Invia"
+        >
+          {sending ? <Loader2 size={18} className="spin" /> : <Send size={18} />}
+        </button>
+      </div>
+      <span className="composer-hint">
+        Solo testo ed emoji · Invio per inviare, Maiusc+Invio per andare a capo
+      </span>
+    </form>
+  );
+
   return (
     <div className="chat">
       <div className="chat-body" ref={bodyRef} onScroll={onScroll}>
@@ -330,87 +438,7 @@ export function ChatRoom({
         })}
       </div>
 
-      {!canWrite ? (
-        <div className="chat-disabled">{disabledReason || 'Non puoi scrivere in questa chat.'}</div>
-      ) : (
-        <form className="chat-input" onSubmit={submit}>
-          {replyTo ? (
-            <div className="composer-note reply">
-              <div>
-                <strong>Rispondi a {replyTo.authorNickname}</strong>
-                <span>{replyTo.deleted ? 'Messaggio eliminato' : replyTo.text.slice(0, 120)}</span>
-              </div>
-              <button type="button" className="icon-btn" onClick={cancelComposer} aria-label="Annulla risposta">
-                <X size={16} />
-              </button>
-            </div>
-          ) : null}
-          {editing ? (
-            <div className="composer-note edit">
-              <div>
-                <strong>Modifica messaggio</strong>
-                <span>{editing.text.slice(0, 120)}</span>
-              </div>
-              <button type="button" className="icon-btn" onClick={cancelComposer} aria-label="Annulla modifica">
-                <X size={16} />
-              </button>
-            </div>
-          ) : null}
-          <div className="composer-row">
-            <div className="emoji-anchor">
-              <button
-                type="button"
-                className="icon-btn"
-                onClick={() => setEmojiOpen((open) => !open)}
-                aria-label="Emoji"
-              >
-                <Smile size={20} />
-              </button>
-              {emojiOpen ? (
-                <EmojiPicker
-                  onPick={(emoji) => {
-                    addEmoji(emoji);
-                  }}
-                  onClose={() => setEmojiOpen(false)}
-                />
-              ) : null}
-            </div>
-            <textarea
-              ref={inputRef}
-              className="chat-textarea"
-              rows={1}
-              value={text}
-              maxLength={LIMITS.maxMessageLength}
-              placeholder={editing ? 'Modifica il messaggio…' : 'Scrivi un messaggio…'}
-              onFocus={() => {
-                stickRef.current = true;
-                requestAnimationFrame(() => {
-                  const body = bodyRef.current;
-                  if (body) body.scrollTop = body.scrollHeight;
-                });
-              }}
-              onChange={(event) => setText(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' && !event.shiftKey) {
-                  event.preventDefault();
-                  submit();
-                }
-              }}
-            />
-            <button
-              type="submit"
-              className="send-btn"
-              disabled={!text.trim() || sending}
-              aria-label="Invia"
-            >
-              {sending ? <Loader2 size={18} className="spin" /> : <Send size={18} />}
-            </button>
-          </div>
-          <span className="composer-hint">
-            Solo testo ed emoji · Invio per inviare, Maiusc+Invio per andare a capo
-          </span>
-        </form>
-      )}
+      {isMobile && composerSlot ? createPortal(composer, composerSlot) : composer}
 
       <Modal
         open={Boolean(reportTarget)}

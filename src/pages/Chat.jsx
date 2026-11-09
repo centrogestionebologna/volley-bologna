@@ -40,6 +40,7 @@ export function Chat() {
           isModerator={isAdmin}
           autoFocus={searchParams.get('focus') === '1'}
           focusRequest={focusRequest}
+          composerLabel="#generale"
           disabledReason={
             isBanned
               ? 'Il tuo account è sospeso: non puoi scrivere in chat.'
