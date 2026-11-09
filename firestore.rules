@@ -204,6 +204,18 @@ service cloud.firestore {
       allow delete: if isAdmin() || isGroupOwner(groupId);
     }
 
+    // Indice codice → gruppo. Il documento è leggibile solo conoscendo l'hash
+    // del codice, quindi non permette di elencare i gruppi privati.
+    match /groupInvites/{inviteHash} {
+      allow get: if signedIn();
+      allow list: if false;
+      allow create: if canWrite()
+        && isGroupOwner(request.resource.data.groupId)
+        && request.resource.data.ownerId == uid();
+      allow update, delete: if isAdmin()
+        || (signedIn() && isGroupOwner(resource.data.groupId));
+    }
+
     match /groups/{groupId}/members/{memberId} {
       allow read: if signedIn();
 

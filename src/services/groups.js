@@ -1,6 +1,6 @@
 import { store } from '../backend';
 import { serverTimestamp } from '../store/base';
-import { sha256Hex, generateInviteCode } from '../lib/crypto';
+import { sha256Hex, generateInviteCode, normalizeInviteCode } from '../lib/crypto';
 
 const memberPath = (groupId, uid) => `groups/${groupId}/members/${uid}`;
 
@@ -67,6 +67,13 @@ export async function createGroup({ name, description = '', visibility, owner })
         inviteHash,
         updatedAt: serverTimestamp(),
       });
+      // Indice pubblico per ritrovare il gruppo partendo dal solo codice.
+      await store.setDoc(`groupInvites/${inviteHash}`, {
+        groupId,
+        ownerId: owner.uid,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
     }
 
     await store.setDoc(memberPath(groupId, owner.uid), {
@@ -83,6 +90,9 @@ export async function createGroup({ name, description = '', visibility, owner })
     if (groupId) {
       // Se una delle scritture fallisce, non lasciamo un gruppo senza fondatore.
       try {
+        if (inviteHash) await store.deleteDoc(`groupInvites/${inviteHash}`);
+      } catch {}
+      try {
         await store.deleteDoc(`groupSecrets/${groupId}`);
       } catch {}
       try {
@@ -97,7 +107,7 @@ export async function createGroup({ name, description = '', visibility, owner })
 }
 
 export async function joinGroup({ groupId, user, inviteCode = '' }) {
-  const invite = String(inviteCode || '').trim();
+  const invite = normalizeInviteCode(inviteCode);
   return store.runTransaction(async (tx) => {
     const groupDoc = await tx.get(`groups/${groupId}`);
     if (!groupDoc) throw new Error('Gruppo non trovato.');
@@ -140,6 +150,36 @@ export async function joinGroup({ groupId, user, inviteCode = '' }) {
 
     return status;
   });
+}
+
+export async function joinGroupByCode({ code, user }) {
+  const invite = normalizeInviteCode(code);
+  if (!invite) throw new Error('Inserisci il codice invito.');
+  const inviteHash = await sha256Hex(invite);
+  const lookup = await store.getDoc(`groupInvites/${inviteHash}`);
+  const groupId = lookup?.data?.groupId;
+  if (!groupId) throw new Error('Codice invito non valido o non più attivo.');
+  const status = await joinGroup({ groupId, user, inviteCode: invite });
+  return { groupId, status };
+}
+
+export async function ensureInviteIndex({ groupId, inviteCode, ownerId }) {
+  const invite = normalizeInviteCode(inviteCode);
+  if (!groupId || !invite) return null;
+  const inviteHash = await sha256Hex(invite);
+  const existing = await store.getDoc(`groupInvites/${inviteHash}`).catch(() => null);
+  if (existing?.data?.groupId === groupId) return inviteHash;
+  await store.setDoc(
+    `groupInvites/${inviteHash}`,
+    {
+      groupId,
+      ownerId,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true }
+  );
+  return inviteHash;
 }
 
 export async function approveMember({ groupId, uid }) {
@@ -223,20 +263,42 @@ export async function getGroupSecret(groupId) {
 }
 
 export async function regenerateInvite(groupId, ownerId) {
+  const previous = await store.getDoc(`groupSecrets/${groupId}`).catch(() => null);
   const code = generateInviteCode();
+  const inviteHash = await sha256Hex(code);
   await store.setDoc(
     `groupSecrets/${groupId}`,
     {
       ownerId,
       inviteCode: code,
-      inviteHash: await sha256Hex(code),
+      inviteHash,
       updatedAt: serverTimestamp(),
     },
     { merge: true }
   );
+  await store.setDoc(`groupInvites/${inviteHash}`, {
+    groupId,
+    ownerId,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+  if (previous?.data?.inviteHash && previous.data.inviteHash !== inviteHash) {
+    try {
+      await store.deleteDoc(`groupInvites/${previous.data.inviteHash}`);
+    } catch {}
+  }
   return code;
 }
 
 export async function deleteGroup(groupId) {
+  const secret = await store.getDoc(`groupSecrets/${groupId}`).catch(() => null);
+  if (secret?.data?.inviteHash) {
+    try {
+      await store.deleteDoc(`groupInvites/${secret.data.inviteHash}`);
+    } catch {}
+  }
+  try {
+    await store.deleteDoc(`groupSecrets/${groupId}`);
+  } catch {}
   await store.deleteDoc(`groups/${groupId}`);
 }

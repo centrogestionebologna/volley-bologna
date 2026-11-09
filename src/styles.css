@@ -1887,6 +1887,90 @@ textarea {
   margin-top: 14px;
 }
 
+.btn-whatsapp {
+  background: #128c4a;
+  border-color: #128c4a;
+  color: #fff;
+  box-shadow: 0 10px 20px -12px rgba(18, 140, 74, 0.9);
+}
+
+.btn-whatsapp:hover:not(:disabled) {
+  background: #0f743d;
+  border-color: #0f743d;
+  color: #fff;
+}
+
+.private-gate {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  margin-bottom: 22px;
+  background:
+    radial-gradient(circle at top right, rgba(245, 184, 61, 0.16), transparent 42%),
+    var(--card);
+  border-color: #ebdcc0;
+}
+
+.private-gate-icon {
+  width: 48px;
+  height: 48px;
+  flex: 0 0 48px;
+  border-radius: 14px;
+  display: grid;
+  place-items: center;
+  background: var(--amber-soft);
+  color: #9a6410;
+}
+
+.private-gate-copy {
+  flex: 1;
+  min-width: 0;
+}
+
+.private-gate-copy h2 {
+  margin-bottom: 6px;
+}
+
+.private-gate-note {
+  margin-top: 10px;
+  padding: 9px 12px;
+  border-radius: 9px;
+  background: var(--amber-soft);
+  color: #7a5210;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.private-gate-form {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+  margin-top: 14px;
+}
+
+.private-gate-form .input {
+  flex: 1;
+  min-width: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.private-gate-form .btn {
+  white-space: nowrap;
+}
+
+.private-gate-hint {
+  margin-top: 10px;
+}
+
+.private-groups-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 14px;
+  margin: 4px 0 14px;
+}
+
 .invite-code-form {
   display: flex;
   gap: 8px;
@@ -3835,6 +3919,23 @@ textarea {
 
   .group-title-row h1 {
     font-size: 1.6rem;
+  }
+
+  .private-gate {
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .private-gate-form {
+    flex-direction: column;
+  }
+
+  .private-gate-form .btn {
+    justify-content: center;
+  }
+
+  .private-groups-head {
+    align-items: flex-start;
   }
 
   .chat-body {

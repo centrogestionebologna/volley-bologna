@@ -9,3 +9,7 @@ export function generateInviteCode(prefix = 'VOLLEY') {
   const token = [...random].map((byte) => byte.toString(36).padStart(2, '0')).join('').toUpperCase();
   return `${prefix}-${token}`;
 }
+
+export function normalizeInviteCode(value) {
+  return String(value || '').trim().toUpperCase().replace(/\s+/g, '');
+}

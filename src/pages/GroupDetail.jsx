@@ -22,6 +22,7 @@ import { useAsync, useSubscription } from '../lib/hooks';
 import {
   approveMember,
   deleteGroup,
+  ensureInviteIndex,
   getGroupSecret,
   joinGroup,
   leaveGroup,
@@ -35,6 +36,7 @@ import {
 import { groupChatPath } from '../services/chat';
 import { Avatar, Chip, EmptyState, Modal, Spinner } from '../components/ui';
 import { ChatRoom } from '../components/ChatRoom';
+import { PrivateGroupGate } from '../components/PrivateGroupGate';
 import { useChatComposerDock } from '../components/ChatComposerDock';
 import { useToast } from '../components/Toast';
 import { formatDateShort } from '../lib/format';
@@ -70,7 +72,7 @@ export function GroupDetail() {
 
   const [tab, setTab] = useState(() => (searchParams.get('tab') === 'membri' ? 'members' : 'chat'));
   const [busy, setBusy] = useState('');
-  const [code, setCode] = useState('');
+  const [inviteBusy, setInviteBusy] = useState(() => Boolean(searchParams.get('invite')));
   const [showBanModal, setShowBanModal] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const attemptedInvite = useRef(false);
@@ -82,38 +84,72 @@ export function GroupDetail() {
   const inviteCode = secret.data?.data?.inviteCode || '';
 
   useEffect(() => {
-    if (!focusRequested || groupState.loading || membershipState.loading) return;
-    if (!isMember || isBannedHere) navigate(`/gruppi/${groupId}`, { replace: true });
-  }, [focusRequested, groupState.loading, membershipState.loading, isMember, isBannedHere, groupId, navigate]);
-
-  useEffect(() => {
     if (searchParams.get('tab') === 'membri') setTab('members');
   }, [searchParams]);
 
   useEffect(() => {
+    if (isMember) setInviteBusy(false);
+  }, [isMember]);
+
+  useEffect(() => {
+    if (!isOwner || !inviteCode) return undefined;
+    ensureInviteIndex({ groupId, inviteCode, ownerId: uid }).catch(() => {});
+    return undefined;
+  }, [groupId, isOwner, inviteCode, uid]);
+
+  useEffect(() => {
     const invite = searchParams.get('invite');
     if (!invite || !group || attemptedInvite.current) return;
-    if (isMember || isBannedHere) return;
     attemptedInvite.current = true;
-    joinGroup({ groupId, user: { uid, nickname }, inviteCode: invite })
+    setInviteBusy(true);
+
+    if (isBannedHere) {
+      setInviteBusy(false);
+      navigate(`/gruppi/${groupId}`, { replace: true });
+      return;
+    }
+
+    if (isMember) {
+      setInviteBusy(false);
+      navigate(`/gruppi/${groupId}?focus=1`, { replace: true });
+      return;
+    }
+
+    joinGroup({
+      groupId,
+      user: { uid, nickname },
+      inviteCode: group.visibility === 'private' ? invite : '',
+    })
       .then((status) => {
         if (status === 'active') toast.success('Sei entrato nel gruppo tramite invito!');
+        navigate(`/gruppi/${groupId}?focus=1`, { replace: true });
       })
-      .catch((error) => toast.error(error.message))
-      .finally(() => navigate(`/gruppi/${groupId}`, { replace: true }));
+      .catch((error) => {
+        toast.error(
+          error?.code === 'permission-denied'
+            ? 'Codice invito non valido o gruppo non accessibile.'
+            : error.message
+        );
+        setInviteBusy(false);
+        navigate(`/gruppi/${groupId}`, { replace: true });
+      });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [group, isMember, searchParams]);
+  }, [group, isMember, isBannedHere, groupId, navigate, searchParams, toast, uid, nickname]);
 
-  const join = async (inviteCode = '') => {
+  const join = async () => {
     setBusy('join');
     try {
-      const status = await joinGroup({ groupId, user: { uid, nickname }, inviteCode });
-      if (status === 'pending') toast.success('Richiesta inviata: attendi l’approvazione del fondatore.');
-      else toast.success('Benvenuto nel gruppo!');
+      const status = await joinGroup({ groupId, user: { uid, nickname } });
+      if (status === 'pending') {
+        toast.success('Richiesta inviata: attendi l’approvazione del fondatore.');
+      } else {
+        toast.success('Benvenuto nel gruppo!');
+        navigate(`/gruppi/${groupId}?focus=1`, { replace: true });
+      }
     } catch (error) {
       toast.error(
         error?.code === 'permission-denied'
-          ? 'Codice invito non valido o gruppo non accessibile.'
+          ? 'Gruppo non accessibile.'
           : error.message
       );
     } finally {
@@ -219,7 +255,7 @@ export function GroupDetail() {
     }
   };
 
-  if (groupState.loading) return <Spinner />;
+  if (groupState.loading || membershipState.loading) return <Spinner />;
 
   if (!group) {
     return (
@@ -229,6 +265,24 @@ export function GroupDetail() {
             Torna ai gruppi
           </Link>
         </EmptyState>
+      </div>
+    );
+  }
+
+  if (inviteBusy) return <Spinner label="Apertura invito…" />;
+
+  if (group.visibility === 'private' && !isMember && !isBannedHere) {
+    return (
+      <div className="page">
+        <Link to="/gruppi" className="back-link">
+          <ArrowLeft size={15} /> Tutti i gruppi
+        </Link>
+        <PrivateGroupGate
+          title="Gruppo privato"
+          subtitle="Inserisci il codice ricevuto da un amico per sbloccare questo gruppo e aprire la chat."
+          pending={isPending}
+          onUnlocked={(unlockedId) => navigate(`/gruppi/${unlockedId}?focus=1`, { replace: true })}
+        />
       </div>
     );
   }
@@ -336,11 +390,12 @@ export function GroupDetail() {
           ) : isBannedHere ? null : (
             <button
               type="button"
-              className="btn btn-primary btn-sm"
-              onClick={() => join(code)}
+              className="btn btn-whatsapp btn-sm"
+              onClick={join}
               disabled={busy === 'join' || isPending}
             >
-              {group.visibility === 'private' ? 'Richiedi accesso' : 'Entra nel gruppo'}
+              <MessageCircle size={15} />
+              {isPending ? 'Richiesta in attesa' : 'Entra nel gruppo'}
             </button>
           )}
           {isOwner ? (
@@ -364,7 +419,7 @@ export function GroupDetail() {
         </div>
       ) : null}
 
-      {!isMember && !isBannedHere ? (
+      {!isMember && !isBannedHere && group.visibility !== 'private' ? (
         <div className="card card-pad join-card">
           {isPending ? (
             <>
@@ -376,29 +431,20 @@ export function GroupDetail() {
             </>
           ) : (
             <>
-              <h2>{group.visibility === 'private' ? 'Gruppo privato' : 'Entra nella conversazione'}</h2>
+              <h2>Entra nella conversazione</h2>
               <p className="muted">
-                {group.visibility === 'private'
-                  ? 'Serve l’approvazione del fondatore, oppure un link invito diretto.'
-                  : 'Il gruppo è pubblico: puoi entrare subito e leggere la chat.'}
+                Il gruppo è pubblico: puoi entrare subito e leggere la chat. La conversazione
+                comparirà solo dopo l’ingresso.
               </p>
               <div className="join-actions">
-                <button type="button" className="btn btn-primary" onClick={() => join('')} disabled={busy === 'join'}>
-                  {group.visibility === 'private' ? 'Richiedi accesso' : 'Entra nel gruppo'}
+                <button
+                  type="button"
+                  className="btn btn-whatsapp"
+                  onClick={join}
+                  disabled={busy === 'join'}
+                >
+                  <MessageCircle size={18} /> Entra nel gruppo
                 </button>
-                {group.visibility === 'private' ? (
-                  <div className="invite-code-form">
-                    <input
-                      className="input"
-                      placeholder="Codice invito (es. VOLLEY-ABC123)"
-                      value={code}
-                      onChange={(event) => setCode(event.target.value)}
-                    />
-                    <button type="button" className="btn btn-ghost" onClick={() => join(code)} disabled={!code.trim()}>
-                      Usa invito
-                    </button>
-                  </div>
-                ) : null}
               </div>
             </>
           )}
