@@ -3254,7 +3254,7 @@ textarea {
   }
 
   .content {
-    padding: 18px 16px calc(78px + env(safe-area-inset-bottom));
+    padding: 18px 16px calc(118px + env(safe-area-inset-bottom));
   }
 
   .offer-banner {
@@ -3277,10 +3277,11 @@ textarea {
     backdrop-filter: blur(10px);
     border-top: 1px solid var(--line);
     z-index: 30;
-    padding: 7px 8px calc(7px + env(safe-area-inset-bottom));
+    padding: 55px 8px calc(7px + env(safe-area-inset-bottom));
   }
 
   .quick-composer {
+    position: relative;
     display: grid;
     grid-template-columns: minmax(0, 1fr) 42px;
     grid-template-rows: 46px;
@@ -3389,6 +3390,35 @@ textarea {
     border-color: #c9d9f5;
     background: var(--blue-soft);
     color: var(--blue);
+  }
+
+  .quick-groups {
+    position: absolute;
+    right: 0;
+    bottom: calc(100% + 6px);
+    width: 42px;
+    height: 42px;
+    display: grid;
+    place-items: center;
+    border: 1px solid #c9d9f5;
+    border-radius: 14px;
+    background: var(--blue-soft);
+    color: var(--blue);
+    box-shadow: 0 4px 16px -10px rgba(15, 30, 50, 0.3);
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+  }
+
+  .quick-groups:hover,
+  .quick-groups:focus-visible {
+    border-color: var(--blue);
+    background: #dbe7fb;
+  }
+
+  .quick-groups.active {
+    border-color: var(--blue);
+    background: var(--blue);
+    color: #fff;
   }
 
   .quick-composer-slot {
@@ -3592,7 +3622,9 @@ textarea {
 
   .group-wheel-item {
     position: relative;
-    display: block;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     width: 100%;
     height: 44px;
     padding: 0 12px;
@@ -3602,15 +3634,22 @@ textarea {
     color: var(--muted);
     font-size: 0.82rem;
     font-weight: 600;
-    text-align: left;
-    white-space: nowrap;
+    line-height: 1.2;
+    text-align: center;
     overflow: hidden;
-    text-overflow: ellipsis;
     scroll-snap-align: center;
     transform-origin: center;
     will-change: transform, opacity;
     cursor: default;
     user-select: none;
+  }
+
+  .group-wheel-label {
+    display: block;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .group-wheel-item.active {
@@ -4212,7 +4251,7 @@ html.chat-mode-active body {
     flex: 1;
     min-height: 0;
     max-width: none;
-    padding: 0 0 calc(66px + env(safe-area-inset-bottom));
+    padding: 0 0 calc(116px + env(safe-area-inset-bottom));
   }
 
   .chat-page--full {
@@ -4364,8 +4403,9 @@ html.chat-mode-active body {
     font-size: 0.82rem;
   }
 
-  .keyboard-open .quick-wheel-trigger,
-  .keyboard-open .quick-wheel-empty {
+  .keyboard-open  .quick-wheel-trigger,
+  .keyboard-open .quick-wheel-empty,
+  .keyboard-open .quick-groups {
     display: none;
   }
 

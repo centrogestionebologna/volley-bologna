@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
-import { Home, Smile } from 'lucide-react';
+import { Home, Smile, Users } from 'lucide-react';
 import { useAuth } from '../auth/AuthProvider';
 import { store } from '../backend';
 import { useSubscription } from '../lib/hooks';
@@ -139,6 +139,19 @@ export function QuickComposer() {
             </span>
           </button>
         ) : null}
+
+        <button
+          type="button"
+          className={`quick-groups ${wheelOpen ? 'active' : ''}`}
+          onClick={() => setWheelOpen((open) => !open)}
+          aria-label="Scegli il gruppo"
+          aria-haspopup="dialog"
+          aria-controls="group-wheel"
+          aria-expanded={wheelOpen}
+          title="Gruppi"
+        >
+          <Users size={18} />
+        </button>
 
         <NavLink
           to="/"

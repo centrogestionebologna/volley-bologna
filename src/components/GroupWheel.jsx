@@ -82,7 +82,7 @@ export function GroupWheel({ items, target, onSelect, onClose }) {
   }, [items, onSelect]);
 
   return (
-    <div className="group-wheel-popover" role="dialog" aria-label="Scegli il gruppo">
+    <div className="group-wheel-popover" id="group-wheel" role="dialog" aria-label="Scegli il gruppo">
       <div className="group-wheel-head">
         <div>
           <strong>Scegli la chat</strong>
@@ -107,7 +107,7 @@ export function GroupWheel({ items, target, onSelect, onClose }) {
               aria-selected={target === item.id}
               title={item.name}
             >
-              {item.name}
+              <span className="group-wheel-label">{item.name}</span>
             </div>
           ))}
         </div>
