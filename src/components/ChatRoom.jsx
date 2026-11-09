@@ -309,28 +309,35 @@ export function ChatRoom({
             />
           ) : null}
         </div>
-        <textarea
-          ref={inputRef}
-          className="chat-textarea"
-          rows={1}
-          value={text}
-          maxLength={LIMITS.maxMessageLength}
-          placeholder={editing ? 'Modifica il messaggio…' : `Scrivi in ${composerLabel}`}
-          onFocus={() => {
-            stickRef.current = true;
-            requestAnimationFrame(() => {
-              const body = bodyRef.current;
-              if (body) body.scrollTop = body.scrollHeight;
-            });
-          }}
-          onChange={(event) => setText(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter' && !event.shiftKey) {
-              event.preventDefault();
-              submit();
-            }
-          }}
-        />
+        <div className="composer-field">
+          <textarea
+            ref={inputRef}
+            className="chat-textarea"
+            rows={1}
+            value={text}
+            maxLength={LIMITS.maxMessageLength}
+            aria-label={editing ? 'Modifica il messaggio' : `Scrivi in ${composerLabel}`}
+            onFocus={() => {
+              stickRef.current = true;
+              requestAnimationFrame(() => {
+                const body = bodyRef.current;
+                if (body) body.scrollTop = body.scrollHeight;
+              });
+            }}
+            onChange={(event) => setText(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
+                submit();
+              }
+            }}
+          />
+          {!text ? (
+            <span className="composer-placeholder" aria-hidden="true">
+              <span>{editing ? 'Modifica il messaggio…' : `Scrivi in ${composerLabel}`}</span>
+            </span>
+          ) : null}
+        </div>
         <button
           type="submit"
           className="send-btn"

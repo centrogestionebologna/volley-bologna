@@ -2311,6 +2311,41 @@ textarea {
   background: #fff;
 }
 
+.composer-field {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-width: 0;
+}
+
+.composer-field .chat-textarea {
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+}
+
+.composer-placeholder {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  padding: 0 14px;
+  color: #6b7280;
+  font-size: 0.84rem;
+  font-weight: 600;
+  line-height: 1.2;
+  pointer-events: none;
+}
+
+.composer-placeholder > span {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .send-btn {
   width: 42px;
   height: 42px;
@@ -3254,7 +3289,7 @@ textarea {
   }
 
   .content {
-    padding: 18px 16px calc(118px + env(safe-area-inset-bottom));
+    padding: 18px 16px calc(78px + env(safe-area-inset-bottom));
   }
 
   .offer-banner {
@@ -3277,7 +3312,7 @@ textarea {
     backdrop-filter: blur(10px);
     border-top: 1px solid var(--line);
     z-index: 30;
-    padding: 55px 8px calc(7px + env(safe-area-inset-bottom));
+    padding: 7px 8px calc(7px + env(safe-area-inset-bottom));
   }
 
   .quick-composer {
@@ -3338,14 +3373,14 @@ textarea {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: 0.9rem;
+    font-size: 0.84rem;
     color: var(--ink);
   }
 
   .quick-launch-copy small {
     margin-top: 2px;
     color: var(--muted);
-    font-size: 0.7rem;
+    font-size: 0.66rem;
   }
 
   .quick-wheel-trigger {
@@ -3376,10 +3411,12 @@ textarea {
   .quick-home {
     grid-column: 2;
     grid-row: 1;
+    align-self: center;
     width: 42px;
-    height: 100%;
+    height: 42px;
     display: grid;
     place-items: center;
+    padding: 0;
     border: 1px solid var(--line-strong);
     border-radius: 14px;
     background: #fff;
@@ -3395,11 +3432,12 @@ textarea {
   .quick-groups {
     position: absolute;
     right: 0;
-    bottom: calc(100% + 6px);
+    bottom: calc(100% + 8px);
     width: 42px;
     height: 42px;
     display: grid;
     place-items: center;
+    padding: 0;
     border: 1px solid #c9d9f5;
     border-radius: 14px;
     background: var(--blue-soft);
@@ -3481,9 +3519,9 @@ textarea {
     box-shadow: none;
   }
 
-  .quick-composer-slot .chat-textarea::placeholder {
-    color: #6b7280;
-    font-weight: 600;
+  .quick-composer-slot .composer-placeholder {
+    padding: 0 5px;
+    font-size: 0.82rem;
   }
 
   .quick-composer-slot .chat-input .icon-btn,
@@ -3532,7 +3570,7 @@ textarea {
   .group-wheel-popover {
     position: absolute;
     right: 8px;
-    bottom: calc(100% + 8px);
+    bottom: calc(100% + 52px);
     width: 198px;
     max-width: calc(100vw - 16px);
     padding: 10px;
@@ -4251,7 +4289,7 @@ html.chat-mode-active body {
     flex: 1;
     min-height: 0;
     max-width: none;
-    padding: 0 0 calc(116px + env(safe-area-inset-bottom));
+    padding: 0 0 calc(66px + env(safe-area-inset-bottom));
   }
 
   .chat-page--full {
@@ -4412,7 +4450,8 @@ html.chat-mode-active body {
   .keyboard-open .quick-home {
     grid-column: 2;
     grid-row: 1;
-    width: 40px;
+    align-self: center;
+    width: 38px;
     height: 38px;
     border-radius: 12px;
   }
