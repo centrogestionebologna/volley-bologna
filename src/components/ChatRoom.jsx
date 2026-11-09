@@ -122,6 +122,12 @@ export function ChatRoom({
   }, [path]);
 
   useEffect(() => {
+    const root = document.documentElement;
+    root.classList.toggle('message-actions-open', Boolean(activeMessageId));
+    return () => root.classList.remove('message-actions-open');
+  }, [activeMessageId]);
+
+  useEffect(() => {
     if (!activeMessageId) return undefined;
 
     const onPointerDown = (event) => {

@@ -3468,6 +3468,10 @@ textarea {
     color: #fff;
   }
 
+  .message-actions-open .quick-groups {
+    display: none;
+  }
+
   .quick-composer-slot {
     display: none;
     min-width: 0;
