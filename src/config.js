@@ -35,7 +35,7 @@ export const LIMITS = {
   offerMinutes: 30,
   messagesPageSize: 40,
   maxMessageLength: 1200,
-  maxNicknameLength: 24,
+  maxNicknameLength: 32,
   maxPlayers: 40,
 };
 

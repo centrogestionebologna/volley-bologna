@@ -106,6 +106,10 @@ export function GroupWheel({ items, target, onSelect, onClose }) {
               role="option"
               aria-selected={target === item.id}
               title={item.name}
+              onClick={() => {
+                onSelect(item.id);
+                onClose();
+              }}
             >
               <span className="group-wheel-label">{item.name}</span>
             </div>

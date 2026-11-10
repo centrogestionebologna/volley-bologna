@@ -118,5 +118,5 @@ export function suggestNickname(displayName = '', email = '') {
     .replace(/[^\p{L}\p{N} ._-]/gu, '')
     .trim();
   const compact = base.replace(/\s+/g, '');
-  return (compact || 'Giocatore').slice(0, 18);
+  return compact || 'Giocatore';
 }

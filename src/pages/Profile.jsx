@@ -25,6 +25,7 @@ import { listMyRegistrations } from '../services/matches';
 import { Avatar, Chip, EmptyState, Field, PageHead, Spinner } from '../components/ui';
 import { useToast } from '../components/Toast';
 import { formatDateShort, formatDateTime, toDate } from '../lib/format';
+import { LIMITS } from '../config';
 
 export function Profile() {
   const { uid, user, profile, nickname, isAdmin, signOut, refresh } = useAuth();
@@ -181,7 +182,7 @@ export function Profile() {
                   className="input"
                   value={nick}
                   onChange={(event) => setNick(event.target.value)}
-                  maxLength={24}
+                  maxLength={LIMITS.maxNicknameLength}
                   minLength={2}
                 />
               </Field>

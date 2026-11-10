@@ -105,6 +105,7 @@ export function QuickComposer() {
       setTarget(id);
       if (navigateTimer.current) clearTimeout(navigateTimer.current);
       navigateTimer.current = setTimeout(() => {
+        setWheelOpen(false);
         navigate(chatPathFor(id), { replace: true });
       }, 320);
     },

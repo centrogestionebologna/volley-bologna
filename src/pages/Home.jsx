@@ -57,7 +57,7 @@ export function Home() {
         (toDate(a.match?.startsAt)?.getTime() || 0) - (toDate(b.match?.startsAt)?.getTime() || 0)
     );
   const next = myUpcoming[0];
-  const firstName = String(nickname || 'giocatore').split(/\s+/)[0];
+  const displayName = String(nickname || 'giocatore').trim();
 
   return (
     <div className="page home-page home-page--dark">
@@ -65,7 +65,7 @@ export function Home() {
         <div className="home-dark-hero-copy">
           <span className="eyebrow">Bologna · community pallavolo</span>
           <h1>
-            Ciao, <span>{firstName}</span>.
+            Ciao, <span>{displayName}</span>.
           </h1>
           <p>
             Trova una partita, organizza il prossimo match o entra nella chat della community.
