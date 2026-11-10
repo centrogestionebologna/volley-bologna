@@ -54,6 +54,7 @@ export function ChatRoom({
   disabledReason,
   isModerator = false,
   composerLabel = 'questa chat',
+  retentionDays = LIMITS.messageRetentionDays,
 }) {
   const toast = useToast();
   const isMobile = useIsMobile();
@@ -380,7 +381,7 @@ export function ChatRoom({
             </button>
           ) : (
             <span className="chat-start">
-              Messaggi conservati per {LIMITS.messageRetentionDays} giorni
+              Messaggi conservati per {retentionDays} {retentionDays === 1 ? 'giorno' : 'giorni'}
             </span>
           )}
         </div>

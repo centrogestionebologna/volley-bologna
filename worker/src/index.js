@@ -5,6 +5,13 @@ const OFFER_MS = 30 * 60000;
 const RETENTION_DAYS = 30;
 const pad = (value) => String(value).padStart(2, '0');
 
+function retentionDaysForGroup(group) {
+  if (group.disappearingMessages === '24h') return 1;
+  if (group.disappearingMessages === '7d') return 7;
+  if (group.disappearingMessages === '90d') return 90;
+  return RETENTION_DAYS;
+}
+
 function romeParts(date) {
   const parts = new Intl.DateTimeFormat('en-GB', {
     timeZone: 'Europe/Rome',
@@ -119,14 +126,20 @@ async function expireOffers(env, db, now) {
 }
 
 async function purgeMessages(env, db, now) {
-  const cutoff = new Date(now - RETENTION_DAYS * DAY_MS);
   const groups = await db.query('groups', { limit: 100 });
-  const paths = ['chats/general/messages', ...groups.map((group) => `groups/${group.id}/messages`)];
+  const jobs = [
+    { path: 'chats/general/messages', days: RETENTION_DAYS },
+    ...groups.map((group) => ({
+      path: `groups/${group.id}/messages`,
+      days: retentionDaysForGroup(group.data),
+    })),
+  ];
   let deleted = 0;
 
-  for (const path of paths) {
+  for (const job of jobs) {
+    const cutoff = new Date(now - job.days * DAY_MS);
     for (let round = 0; round < 20; round += 1) {
-      const rows = await db.query(path, { where: ['createdAt', '<', cutoff], limit: 100 });
+      const rows = await db.query(job.path, { where: ['createdAt', '<', cutoff], limit: 100 });
       if (!rows.length) break;
       await db.commit(rows.map((row) => ({ delete: documentName(env, row.path) })));
       deleted += rows.length;

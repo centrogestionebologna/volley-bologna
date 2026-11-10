@@ -4,7 +4,13 @@ import { ArrowRight, Lock, Plus, Users } from 'lucide-react';
 import { useAuth } from '../auth/AuthProvider';
 import { useSubscription } from '../lib/hooks';
 import { store } from '../backend';
-import { createGroup, getMembership } from '../services/groups';
+import {
+  createGroup,
+  createGroupProposal,
+  getMembership,
+  subscribeMyGroupProposals,
+} from '../services/groups';
+import { formatDateShort } from '../lib/format';
 import { PrivateGroupGate } from '../components/PrivateGroupGate';
 import { Chip, EmptyState, Field, Modal, PageHead, Spinner } from '../components/ui';
 import { useToast } from '../components/Toast';
@@ -16,8 +22,8 @@ function GroupCard({ group, isMember }) {
       className="group-card"
     >
       <div className="group-card-head">
-        <span className={`group-icon ${group.visibility === 'private' ? 'private' : ''}`}>
-          {group.visibility === 'private' ? <Lock size={18} /> : <Users size={18} />}
+        <span className={`group-icon ${group.visibility === 'private' ? 'private' : ''} ${group.icon ? 'emoji' : ''}`}>
+          {group.icon || (group.visibility === 'private' ? <Lock size={18} /> : <Users size={18} />)}
         </span>
         <Chip tone={group.visibility === 'private' ? 'amber' : 'green'}>
           {group.visibility === 'private' ? 'Privato' : 'Pubblico'}
@@ -38,7 +44,7 @@ function GroupCard({ group, isMember }) {
 }
 
 export function Groups() {
-  const { uid, nickname } = useAuth();
+  const { uid, nickname, isAdmin } = useAuth();
   const toast = useToast();
   const navigate = useNavigate();
   const [visibilityFilter, setVisibilityFilter] = useState('public');
@@ -60,6 +66,11 @@ export function Groups() {
   const privateGroups = groups.filter(
     (group) => group.visibility === 'private' && memberships[group.id] === 'active'
   );
+  const myProposalsState = useSubscription(
+    (cb) => (uid ? subscribeMyGroupProposals(uid, cb) : () => {}),
+    [uid]
+  );
+  const myProposals = (myProposalsState.data || []).map((row) => ({ id: row.id, ...row.data }));
 
   useEffect(() => {
     if (!uid) {
@@ -96,18 +107,31 @@ export function Groups() {
   const submit = async (event) => {
     event.preventDefault();
     setBusy(true);
+    const isProposal = visibility === 'public' && !isAdmin;
     try {
-      const result = await createGroup({ name, description, visibility, owner: { uid, nickname } });
-      toast.success(
-        visibility === 'private'
-          ? 'Gruppo privato creato: condividi il codice invito dalla sezione Membri.'
-          : 'Gruppo creato!'
-      );
+      if (isProposal) {
+        await createGroupProposal({ name, description, user: { uid, nickname } });
+        toast.success('Proposta inviata: un amministratore la esaminerà.');
+      } else {
+        const result = await createGroup({
+          name,
+          description,
+          visibility,
+          owner: { uid, nickname },
+          actorIsAdmin: isAdmin,
+        });
+        toast.success(
+          visibility === 'private'
+            ? 'Gruppo privato creato: condividi il codice invito dalla sezione Membri.'
+            : 'Gruppo creato!'
+        );
+        navigate(`/gruppi/${result.id}${visibility === 'private' ? '?tab=membri' : ''}`);
+      }
       setModalOpen(false);
       setName('');
       setDescription('');
       setVisibility('public');
-      navigate(`/gruppi/${result.id}${visibility === 'private' ? '?tab=membri' : ''}`);
+      if (isProposal) setVisibilityFilter('public');
     } catch (error) {
       toast.error(
         error?.code === 'permission-denied'
@@ -127,13 +151,60 @@ export function Groups() {
       <PageHead
         eyebrow="Community"
         title="Gruppi"
-        sub="Gruppi pubblici per tutti. I privati si aprono solo con un codice o un link invito."
+        sub="I gruppi pubblici sono scelti dagli amministratori o proposti dagli utenti. I privati possono essere creati da chiunque e restano nascosti."
         actions={
           <button type="button" className="btn btn-primary" onClick={() => setModalOpen(true)}>
             <Plus size={17} /> Nuovo gruppo
           </button>
         }
       />
+
+      {myProposals.length > 0 ? (
+        <section className="my-proposals">
+          <div className="private-groups-head">
+            <div>
+              <h2>Le tue proposte</h2>
+              <p className="muted small">
+                Un amministratore deve approvarle prima che il gruppo pubblico venga creato.
+              </p>
+            </div>
+            <Chip tone="amber">{myProposals.length}</Chip>
+          </div>
+          <div className="proposal-list">
+            {myProposals.map((proposal) => (
+              <article key={proposal.id} className="card card-pad proposal-item">
+                <div className="proposal-item-main">
+                  <h3>{proposal.name}</h3>
+                  <p>{proposal.description || 'Nessuna descrizione.'}</p>
+                  <small>Inviata il {formatDateShort(proposal.createdAt)}</small>
+                </div>
+                <div className="proposal-item-side">
+                  <Chip
+                    tone={
+                      proposal.status === 'approved'
+                        ? 'green'
+                        : proposal.status === 'rejected'
+                          ? 'red'
+                          : 'amber'
+                    }
+                  >
+                    {proposal.status === 'approved'
+                      ? 'Approvata'
+                      : proposal.status === 'rejected'
+                        ? 'Rifiutata'
+                        : 'In attesa'}
+                  </Chip>
+                  {proposal.status === 'approved' && proposal.groupId ? (
+                    <Link to={`/gruppi/${proposal.groupId}`} className="btn btn-ghost btn-sm">
+                      Apri gruppo <ArrowRight size={14} />
+                    </Link>
+                  ) : null}
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       <div className="segmented">
         {[
@@ -186,9 +257,13 @@ export function Groups() {
           )}
         </>
       ) : visibleGroups.length === 0 ? (
-        <EmptyState icon={Users} title="Nessun gruppo pubblico" text="Crea il primo gruppo della community.">
+        <EmptyState
+          icon={Users}
+          title="Nessun gruppo pubblico"
+          text={isAdmin ? 'Crea il primo gruppo della community.' : 'Puoi proporne uno agli amministratori.'}
+        >
           <button type="button" className="btn btn-primary btn-sm" onClick={() => setModalOpen(true)}>
-            Crea gruppo
+            {isAdmin ? 'Crea gruppo' : 'Proponi gruppo'}
           </button>
         </EmptyState>
       ) : (
@@ -207,14 +282,18 @@ export function Groups() {
         open={modalOpen}
         onClose={() => setModalOpen(false)}
         title="Crea un gruppo"
-        subtitle="I gruppi pubblici sono subito accessibili. I privati non sono elencati: si entra solo con codice o link invito."
+        subtitle={
+          isAdmin
+            ? 'I gruppi pubblici sono visibili a tutti e li crei subito. I privati restano nascosti e si aprono con codice o link invito.'
+            : 'Puoi creare subito un gruppo privato. Per un gruppo pubblico puoi inviare una proposta agli amministratori.'
+        }
         footer={
           <>
             <button type="button" className="btn btn-ghost" onClick={() => setModalOpen(false)}>
               Annulla
             </button>
             <button type="submit" form="group-form" className="btn btn-primary" disabled={busy || name.trim().length < 3}>
-              Crea gruppo
+              {visibility === 'public' && !isAdmin ? 'Invia proposta' : 'Crea gruppo'}
             </button>
           </>
         }
@@ -252,7 +331,11 @@ export function Groups() {
                   onChange={() => setVisibility('public')}
                 />
                 <strong>Pubblico</strong>
-                <small>Chiunque può entrare subito.</small>
+                <small>
+                  {isAdmin
+                    ? 'Visibile a tutti. Puoi crearlo subito.'
+                    : 'Solo gli admin possono crearlo: invii una proposta.'}
+                </small>
               </label>
               <label className={visibility === 'private' ? 'selected' : ''}>
                 <input
@@ -263,10 +346,15 @@ export function Groups() {
                   onChange={() => setVisibility('private')}
                 />
                 <strong>Privato</strong>
-                <small>Visibile solo con codice o link invito.</small>
+                <small>Chiunque può crearlo. Resta nascosto: si entra con codice o link invito.</small>
               </label>
             </div>
           </Field>
+          {!isAdmin && visibility === 'public' ? (
+            <p className="hint">
+              La proposta non crea subito il gruppo: viene inviata agli amministratori per approvazione.
+            </p>
+          ) : null}
         </form>
       </Modal>
     </div>

@@ -21,7 +21,11 @@ export function PrivateGroupGate({
     setBusy(true);
     try {
       const result = await joinGroupByCode({ code, user: { uid, nickname } });
-      toast.success('Gruppo sbloccato: benvenuto!');
+      toast.success(
+        result.status === 'pending'
+          ? 'Richiesta inviata: attendi l’approvazione del fondatore.'
+          : 'Gruppo sbloccato: benvenuto!'
+      );
       setCode('');
       onUnlocked?.(result.groupId);
     } catch (error) {
@@ -45,7 +49,7 @@ export function PrivateGroupGate({
         <p className="muted">{subtitle}</p>
         {pending ? (
           <p className="private-gate-note">
-            La tua richiesta è in attesa, ma puoi sbloccare subito il gruppo con un codice invito.
+            La tua richiesta è in attesa di approvazione da parte del fondatore.
           </p>
         ) : null}
         <form className="private-gate-form" onSubmit={submit}>

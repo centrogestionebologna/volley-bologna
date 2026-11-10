@@ -1,4 +1,5 @@
 import { store } from '../backend';
+import { DEFAULT_GROUP_SETTINGS, normalizeGroupSettings } from '../config';
 import { serverTimestamp } from '../store/base';
 import { sha256Hex, generateInviteCode, normalizeInviteCode } from '../lib/crypto';
 
@@ -32,20 +33,25 @@ export async function getMembership(groupId, uid) {
   return store.getDoc(memberPath(groupId, uid));
 }
 
-export async function createGroup({ name, description = '', visibility, owner }) {
+export async function createGroup({ name, description = '', visibility, owner, actorIsAdmin = false }) {
   if (!owner?.uid) throw new Error('Sessione non valida: ricarica la pagina e riprova.');
   const cleanName = String(name || '').trim();
   if (cleanName.length < 3) throw new Error('Il nome del gruppo deve avere almeno 3 caratteri.');
   const isPrivate = visibility === 'private';
+  if (!isPrivate && !actorIsAdmin) {
+    throw new Error('Solo gli amministratori possono creare gruppi pubblici. Puoi inviare una proposta.');
+  }
   const ownerNickname = owner.nickname || 'Fondatore';
   let groupId = null;
   let inviteCode = null;
+  let inviteHash = null;
 
   try {
     groupId = await store.addDoc('groups', {
       name: cleanName.slice(0, 80),
       description: String(description || '').trim().slice(0, 400),
       visibility: isPrivate ? 'private' : 'public',
+      ...normalizeGroupSettings(DEFAULT_GROUP_SETTINGS),
       ownerId: owner.uid,
       ownerNickname,
       memberCount: 1,
@@ -57,7 +63,6 @@ export async function createGroup({ name, description = '', visibility, owner })
 
     // Per i gruppi privati il segreto deve esistere prima della membership:
     // le regole verificano che l'invito del fondatore corrisponda al segreto.
-    let inviteHash = null;
     if (isPrivate) {
       inviteCode = generateInviteCode();
       inviteHash = await sha256Hex(inviteCode);
@@ -81,7 +86,7 @@ export async function createGroup({ name, description = '', visibility, owner })
       nickname: ownerNickname,
       role: 'owner',
       status: 'active',
-      inviteHash,
+      inviteHash: null,
       joinedAt: serverTimestamp(),
     });
 
@@ -123,7 +128,7 @@ export async function joinGroup({ groupId, user, inviteCode = '' }) {
     let inviteHash = null;
     if (invite) {
       inviteHash = await sha256Hex(invite);
-      status = 'active';
+      status = group.visibility === 'private' && group.approveNewMembers === true ? 'pending' : 'active';
     }
 
     tx.set(memberPath(groupId, user.uid), {
@@ -255,6 +260,137 @@ export async function setGroupBan({ groupId, targetUid, banned, actorUid, actorI
       pendingCount,
       updatedAt: serverTimestamp(),
     });
+  });
+}
+
+export async function updateGroupDetails({
+  groupId,
+  name,
+  description = '',
+  icon = '',
+  settings = {},
+  actorUid,
+  actorIsAdmin = false,
+  actorIsMember = false,
+}) {
+  const groupDoc = await store.getDoc(`groups/${groupId}`);
+  if (!groupDoc) throw new Error('Gruppo non trovato.');
+  const group = groupDoc.data;
+  const current = normalizeGroupSettings(group);
+  const isOwner = group.ownerId === actorUid;
+  const canEditInfo =
+    isOwner || actorIsAdmin || (actorIsMember && current.editInfoPolicy === 'all');
+  if (!canEditInfo) throw new Error('Non hai i permessi per modificare questo gruppo.');
+
+  const cleanName = String(name || '').trim();
+  if (cleanName.length < 3) throw new Error('Il nome del gruppo deve avere almeno 3 caratteri.');
+  const cleanDescription = String(description || '').trim().slice(0, 400);
+  const merged = normalizeGroupSettings({ ...current, ...settings, icon });
+  const patch = {
+    name: cleanName.slice(0, 80),
+    description: cleanDescription,
+    icon: merged.icon,
+    updatedAt: serverTimestamp(),
+  };
+
+  if (isOwner || actorIsAdmin) {
+    Object.assign(patch, {
+      sendMessagesPolicy: merged.sendMessagesPolicy,
+      editInfoPolicy: merged.editInfoPolicy,
+      addMembersPolicy: merged.addMembersPolicy,
+      approveNewMembers: merged.approveNewMembers,
+      disappearingMessages: merged.disappearingMessages,
+    });
+  }
+
+  await store.updateDoc(`groups/${groupId}`, patch);
+  return merged;
+}
+
+export function subscribeGroupProposals(callback) {
+  return store.subscribeList(
+    'groupProposals',
+    {
+      where: [['status', '==', 'pending']],
+      orderBy: [['createdAt', 'asc']],
+      limit: 50,
+    },
+    callback
+  );
+}
+
+export function subscribeMyGroupProposals(uid, callback) {
+  if (!uid) return () => {};
+  return store.subscribeList(
+    'groupProposals',
+    {
+      where: [['proposedBy', '==', uid]],
+      orderBy: [['createdAt', 'desc']],
+      limit: 20,
+    },
+    callback
+  );
+}
+
+export async function createGroupProposal({ name, description = '', user }) {
+  if (!user?.uid) throw new Error('Sessione non valida: ricarica la pagina e riprova.');
+  const cleanName = String(name || '').trim();
+  if (cleanName.length < 3) throw new Error('Il nome del gruppo deve avere almeno 3 caratteri.');
+  const id = await store.addDoc('groupProposals', {
+    name: cleanName.slice(0, 80),
+    description: String(description || '').trim().slice(0, 400),
+    visibility: 'public',
+    status: 'pending',
+    proposedBy: user.uid,
+    proposedByNickname: user.nickname || 'Utente',
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+  return { id };
+}
+
+export async function approveGroupProposal({
+  proposalId,
+  proposal,
+  actorUid,
+  actorIsAdmin = false,
+}) {
+  if (!actorIsAdmin) throw new Error('Solo gli amministratori possono approvare le proposte.');
+  if (!proposal?.proposedBy) throw new Error('Proposta non valida.');
+
+  const created = await createGroup({
+    name: proposal.name,
+    description: proposal.description || '',
+    visibility: 'public',
+    owner: { uid: proposal.proposedBy, nickname: proposal.proposedByNickname || 'Utente' },
+    actorIsAdmin: true,
+  });
+
+  try {
+    await store.updateDoc(`groupProposals/${proposalId}`, {
+      status: 'approved',
+      groupId: created.id,
+      reviewedAt: serverTimestamp(),
+      reviewedBy: actorUid || null,
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    try {
+      await deleteGroup(created.id);
+    } catch {}
+    throw error;
+  }
+
+  return created;
+}
+
+export async function rejectGroupProposal({ proposalId, actorUid, actorIsAdmin = false }) {
+  if (!actorIsAdmin) throw new Error('Solo gli amministratori possono rifiutare le proposte.');
+  await store.updateDoc(`groupProposals/${proposalId}`, {
+    status: 'rejected',
+    reviewedAt: serverTimestamp(),
+    reviewedBy: actorUid || null,
+    updatedAt: serverTimestamp(),
   });
 }
 

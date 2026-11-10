@@ -215,9 +215,23 @@ service cloud.firestore {
     // ── Gruppi ──────────────────────────────────────────────────────────────
     match /groups/{groupId} {
       allow read: if signedIn();
-      allow create: if canWrite() && request.resource.data.ownerId == uid();
+      allow create: if canWrite()
+        && (
+          (request.resource.data.ownerId == uid() && request.resource.data.visibility == 'private')
+          || isAdmin()
+        );
       allow update: if isAdmin()
         || isGroupOwner(groupId)
+        || (
+          isActiveMember(groupId)
+          && (
+            !groupData(groupId).keys().hasAll(['editInfoPolicy'])
+            || groupData(groupId).editInfoPolicy == 'all'
+          )
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'name', 'description', 'icon', 'updatedAt'
+          ])
+        )
         || (
           signedIn()
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
@@ -228,7 +242,15 @@ service cloud.firestore {
     }
 
     match /groupSecrets/{groupId} {
-      allow get: if isAdmin() || isGroupOwner(groupId);
+      allow get: if isAdmin()
+        || isGroupOwner(groupId)
+        || (
+          isActiveMember(groupId)
+          && (
+            !groupData(groupId).keys().hasAll(['addMembersPolicy'])
+            || groupData(groupId).addMembersPolicy == 'all'
+          )
+        );
       allow list: if false;
       allow create, update: if isGroupOwner(groupId) || isAdmin();
       allow delete: if isAdmin() || isGroupOwner(groupId);
@@ -240,41 +262,79 @@ service cloud.firestore {
       allow get: if signedIn();
       allow list: if false;
       allow create: if canWrite()
-        && isGroupOwner(request.resource.data.groupId)
-        && request.resource.data.ownerId == uid();
+        && (
+          isAdmin()
+          || (
+            isGroupOwner(request.resource.data.groupId)
+            && request.resource.data.ownerId == uid()
+          )
+        );
       allow update, delete: if isAdmin()
         || (signedIn() && isGroupOwner(resource.data.groupId));
+    }
+
+    match /groupProposals/{proposalId} {
+      allow read: if isAdmin() || (signedIn() && resource.data.proposedBy == uid());
+      allow create: if canWrite()
+        && request.resource.data.proposedBy == uid()
+        && request.resource.data.status == 'pending'
+        && request.resource.data.visibility == 'public'
+        && request.resource.data.name is string
+        && request.resource.data.name.size() >= 3
+        && request.resource.data.name.size() <= 80
+        && request.resource.data.description is string
+        && request.resource.data.description.size() <= 400;
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
     }
 
     match /groups/{groupId}/members/{memberId} {
       allow read: if signedIn();
 
       allow create: if canWrite()
-        && memberId == uid()
-        && request.resource.data.uid == uid()
         && groupExists(groupId)
         && !(uid() in groupData(groupId).bannedUids)
         && (
           (
-            groupData(groupId).ownerId == uid()
+            memberId == uid()
+            && request.resource.data.uid == uid()
+            && (
+              (
+                groupData(groupId).ownerId == uid()
+                && request.resource.data.role == 'owner'
+                && request.resource.data.status == 'active'
+                && request.resource.data.inviteHash == null
+              )
+              || (
+                groupData(groupId).visibility == 'public'
+                && request.resource.data.status == 'active'
+                && request.resource.data.inviteHash == null
+              )
+              || (
+                groupData(groupId).visibility == 'private'
+                && request.resource.data.status == 'pending'
+                && request.resource.data.inviteHash == null
+              )
+              || (
+                groupData(groupId).visibility == 'private'
+                && request.resource.data.status == 'pending'
+                && request.resource.data.inviteHash != null
+                && get(/databases/$(database)/documents/groupSecrets/$(groupId)).data.inviteHash == request.resource.data.inviteHash
+              )
+              || (
+                request.resource.data.status == 'active'
+                && request.resource.data.inviteHash != null
+                && get(/databases/$(database)/documents/groupSecrets/$(groupId)).data.inviteHash == request.resource.data.inviteHash
+              )
+            )
+          )
+          || (
+            isAdmin()
+            && memberId == groupData(groupId).ownerId
+            && request.resource.data.uid == groupData(groupId).ownerId
             && request.resource.data.role == 'owner'
             && request.resource.data.status == 'active'
             && request.resource.data.inviteHash == null
-          )
-          || (
-            groupData(groupId).visibility == 'public'
-            && request.resource.data.status == 'active'
-            && request.resource.data.inviteHash == null
-          )
-          || (
-            groupData(groupId).visibility == 'private'
-            && request.resource.data.status == 'pending'
-            && request.resource.data.inviteHash == null
-          )
-          || (
-            request.resource.data.status == 'active'
-            && request.resource.data.inviteHash != null
-            && get(/databases/$(database)/documents/groupSecrets/$(groupId)).data.inviteHash == request.resource.data.inviteHash
           )
         );
 
@@ -304,6 +364,12 @@ service cloud.firestore {
       allow create: if canWrite()
         && isActiveMember(groupId)
         && !(uid() in groupData(groupId).bannedUids)
+        && (
+          !groupData(groupId).keys().hasAll(['sendMessagesPolicy'])
+          || groupData(groupId).sendMessagesPolicy == 'all'
+          || isGroupOwner(groupId)
+          || isAdmin()
+        )
         && request.resource.data.authorId == uid()
         && request.resource.data.deleted == false
         && request.resource.data.text is string

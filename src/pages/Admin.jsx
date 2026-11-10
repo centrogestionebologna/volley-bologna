@@ -3,9 +3,11 @@ import {
   AlertTriangle,
   Ban,
   BadgeCheck,
+  Check,
   ClipboardList,
   Flag,
   Gavel,
+  Globe,
   Loader2,
   MessageSquare,
   Plus,
@@ -36,6 +38,7 @@ import {
   unbanUser,
 } from '../services/moderation';
 import { deleteMessage } from '../services/chat';
+import { approveGroupProposal, rejectGroupProposal, subscribeGroupProposals } from '../services/groups';
 import { runScheduledMaintenance } from '../services/maintenance';
 import { Avatar, Chip, EmptyState, Field, Modal, PageHead, Spinner } from '../components/ui';
 import { useToast } from '../components/Toast';
@@ -43,6 +46,7 @@ import { useToast } from '../components/Toast';
 const TABS = [
   { id: 'overview', label: 'Panoramica', icon: Shield },
   { id: 'reports', label: 'Segnalazioni', icon: Flag },
+  { id: 'groups', label: 'Proposte gruppi', icon: Globe },
   { id: 'users', label: 'Utenti', icon: Users },
   { id: 'words', label: 'Parole vietate', icon: MessageSquare },
   { id: 'disputes', label: 'Contestazioni', icon: Gavel },
@@ -716,6 +720,109 @@ function DisputesTab() {
   );
 }
 
+function GroupProposalsTab({ toast }) {
+  const { uid } = useAuth();
+  const [busy, setBusy] = useState('');
+  const state = useSubscription((cb) => subscribeGroupProposals(cb), []);
+  const proposals = (state.data || []).map((row) => ({ id: row.id, ...row.data }));
+
+  const approve = async (proposal) => {
+    setBusy(`approve-${proposal.id}`);
+    try {
+      await approveGroupProposal({
+        proposalId: proposal.id,
+        proposal,
+        actorUid: uid,
+        actorIsAdmin: true,
+      });
+      toast.success(`Gruppo pubblico creato per ${proposal.proposedByNickname || 'l’utente'}.`);
+    } catch (error) {
+      toast.error(
+        error?.code === 'permission-denied'
+          ? 'Permessi Firestore insufficienti: pubblica le regole aggiornate.'
+          : error.message
+      );
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const reject = async (proposal) => {
+    setBusy(`reject-${proposal.id}`);
+    try {
+      await rejectGroupProposal({
+        proposalId: proposal.id,
+        actorUid: uid,
+        actorIsAdmin: true,
+      });
+      toast.success('Proposta rifiutata.');
+    } catch (error) {
+      toast.error(error.message);
+    } finally {
+      setBusy('');
+    }
+  };
+
+  return (
+    <div className="admin-tab">
+      <section className="card card-pad">
+        <div className="section-head">
+          <h2>Proposte di gruppi pubblici</h2>
+          <Chip tone="amber">{proposals.length}</Chip>
+        </div>
+        <p className="small muted">
+          Approvando una proposta viene creato il gruppo pubblico intestato al proponente. I gruppi
+          privati, invece, possono essere creati direttamente da chiunque.
+        </p>
+        {state.loading ? (
+          <Spinner />
+        ) : proposals.length === 0 ? (
+          <EmptyState
+            icon={Globe}
+            title="Nessuna proposta in attesa"
+            text="Le richieste di nuovi gruppi pubblici compariranno qui."
+          />
+        ) : (
+          <ul className="member-list">
+            {proposals.map((proposal) => (
+              <li key={proposal.id}>
+                <span className="group-icon">
+                  <Globe size={16} />
+                </span>
+                <div>
+                  <strong>{proposal.name}</strong>
+                  <small>{proposal.description || 'Nessuna descrizione.'}</small>
+                  <small>
+                    Proposto da {proposal.proposedByNickname || '—'} · {formatDateTime(proposal.createdAt)}
+                  </small>
+                </div>
+                <div className="row-actions">
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm"
+                    onClick={() => approve(proposal)}
+                    disabled={busy === `approve-${proposal.id}`}
+                  >
+                    <Check size={14} /> Approva
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => reject(proposal)}
+                    disabled={busy === `reject-${proposal.id}`}
+                  >
+                    <X size={14} /> Rifiuta
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+    </div>
+  );
+}
+
 export function Admin() {
   const { isAdmin, nickname } = useAuth();
   const toast = useToast();
@@ -758,6 +865,7 @@ export function Admin() {
 
       {tab === 'overview' ? <OverviewTab onGoTo={setTab} toast={toast} /> : null}
       {tab === 'reports' ? <ReportsTab /> : null}
+      {tab === 'groups' ? <GroupProposalsTab toast={toast} /> : null}
       {tab === 'users' ? <UsersTab toast={toast} /> : null}
       {tab === 'words' ? <WordsTab toast={toast} /> : null}
       {tab === 'disputes' ? <DisputesTab /> : null}

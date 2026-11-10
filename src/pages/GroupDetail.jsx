@@ -9,8 +9,10 @@ import {
   Link2,
   Lock,
   MessageCircle,
+  Pencil,
   RefreshCw,
   Search,
+  Settings,
   ShieldAlert,
   Trash2,
   UserCheck,
@@ -20,7 +22,13 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../auth/AuthProvider';
 import { store } from '../backend';
-import { VOLLEY_ROLES } from '../config';
+import {
+  GROUP_SETTING_OPTIONS,
+  VOLLEY_ROLES,
+  labelOf,
+  normalizeGroupSettings,
+  retentionDaysForSetting,
+} from '../config';
 import { useAsync, useSubscription } from '../lib/hooks';
 import {
   approveMember,
@@ -32,6 +40,7 @@ import {
   regenerateInvite,
   rejectMember,
   setGroupBan,
+  updateGroupDetails,
   subscribeGroup,
   subscribeMembers,
   subscribeMembership,
@@ -65,6 +74,14 @@ export function GroupDetail() {
   const isBannedHere = Boolean(group && (group.bannedUids || []).includes(uid));
   const isMember = membership?.status === 'active';
   const isPending = membership?.status === 'pending';
+  const groupSettings = normalizeGroupSettings(group);
+  const canManageSettings = Boolean(group && (isOwner || isAdmin));
+  const canEditGroup = Boolean(
+    group && (canManageSettings || (isMember && groupSettings.editInfoPolicy === 'all'))
+  );
+  const canReadInvite = Boolean(
+    group && (canManageSettings || (isMember && groupSettings.addMembersPolicy === 'all'))
+  );
   const infoOpen = searchParams.get('tab') === 'membri';
   const focusRequested =
     searchParams.get('focus') === '1' || searchParams.get('chat') === '1';
@@ -82,6 +99,9 @@ export function GroupDetail() {
     note: '',
   });
   const [requestBusy, setRequestBusy] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsForm, setSettingsForm] = useState(null);
+  const [settingsBusy, setSettingsBusy] = useState(false);
   const attemptedInvite = useRef(false);
 
   const myMatchesState = useSubscription(
@@ -109,8 +129,8 @@ export function GroupDetail() {
     .sort((a, b) => (toDate(a.startsAt)?.getTime() || 0) - (toDate(b.startsAt)?.getTime() || 0));
 
   const secret = useAsync(
-    () => (isOwner ? getGroupSecret(groupId) : Promise.resolve(null)),
-    [groupId, isOwner]
+    () => (canReadInvite ? getGroupSecret(groupId) : Promise.resolve(null)),
+    [groupId, canReadInvite]
   );
   const inviteCode = secret.data?.data?.inviteCode || '';
 
@@ -153,7 +173,9 @@ export function GroupDetail() {
       inviteCode: group.visibility === 'private' ? invite : '',
     })
       .then((status) => {
+        setInviteBusy(false);
         if (status === 'active') toast.success('Sei entrato nel gruppo tramite invito!');
+        else toast.success('Richiesta inviata: attendi l’approvazione del fondatore.');
         navigate(`/gruppi/${groupId}?focus=1`, { replace: true });
       })
       .catch((error) => {
@@ -274,6 +296,45 @@ export function GroupDetail() {
     }
   };
 
+  const openSettings = () => {
+    setSettingsForm({
+      name: group.name || '',
+      description: group.description || '',
+      ...groupSettings,
+    });
+    setSettingsOpen(true);
+  };
+
+  const saveSettings = async (event) => {
+    event.preventDefault();
+    if (!settingsForm) return;
+    setSettingsBusy(true);
+    try {
+      await updateGroupDetails({
+        groupId,
+        name: settingsForm.name,
+        description: settingsForm.description,
+        icon: settingsForm.icon,
+        settings: settingsForm,
+        actorUid: uid,
+        actorIsAdmin: isAdmin,
+        actorIsMember: isMember,
+      });
+      toast.success(
+        canManageSettings ? 'Impostazioni aggiornate.' : 'Nome, icona e descrizione aggiornati.'
+      );
+      setSettingsOpen(false);
+    } catch (error) {
+      toast.error(
+        error?.code === 'permission-denied'
+          ? 'Permessi insufficienti: pubblica le regole Firestore aggiornate.'
+          : error.message
+      );
+    } finally {
+      setSettingsBusy(false);
+    }
+  };
+
   const openPlayerRequest = () => {
     setPlayerRequestForm({
       matchId: availableMatches[0]?.id || '',
@@ -384,7 +445,12 @@ export function GroupDetail() {
         ? { tone: 'amber', label: 'In attesa' }
         : { tone: 'muted', label: 'Non iscritto' };
 
-  const canChat = isMember && !isBannedHere && !isBanned && !isSilenced;
+  const canChat =
+    isMember &&
+    !isBannedHere &&
+    !isBanned &&
+    !isSilenced &&
+    (groupSettings.sendMessagesPolicy === 'all' || isOwner || isAdmin);
 
   if (chatOpen) {
     return (
@@ -394,8 +460,8 @@ export function GroupDetail() {
             <Link to="/gruppi" className="chat-head-back" aria-label="Torna ai gruppi e scegli un'altra chat">
               <ChevronLeft size={22} />
             </Link>
-            <span className={`group-icon ${group.visibility === 'private' ? 'private' : ''}`}>
-              {group.visibility === 'private' ? <Lock size={19} /> : <Users size={19} />}
+            <span className={`group-icon ${group.visibility === 'private' ? 'private' : ''} ${group.icon ? 'emoji' : ''}`}>
+              {group.icon || (group.visibility === 'private' ? <Lock size={19} /> : <Users size={19} />)}
             </span>
             <div className="chat-head-title">
               <Link
@@ -413,6 +479,7 @@ export function GroupDetail() {
             canWrite={canChat}
             isModerator={isOwner || isAdmin}
             composerLabel={group.name}
+            retentionDays={retentionDaysForSetting(groupSettings.disappearingMessages)}
             disabledReason={
               isBanned
                 ? 'Il tuo account è sospeso: non puoi scrivere.'
@@ -440,8 +507,8 @@ export function GroupDetail() {
 
       <header className="group-header card">
         <div className="group-header-main">
-          <span className={`group-icon lg ${group.visibility === 'private' ? 'private' : ''}`}>
-            {group.visibility === 'private' ? <Lock size={22} /> : <Users size={22} />}
+          <span className={`group-icon lg ${group.visibility === 'private' ? 'private' : ''} ${group.icon ? 'emoji' : ''}`}>
+            {group.icon || (group.visibility === 'private' ? <Lock size={22} /> : <Users size={22} />)}
           </span>
           <div>
             <div className="group-title-row">
@@ -484,6 +551,65 @@ export function GroupDetail() {
           ) : null}
         </div>
       </header>
+
+      {!isBannedHere ? (
+        <section className="card card-pad group-settings">
+          <div className="section-head">
+            <h2>
+              <Settings size={18} /> Impostazioni gruppo
+            </h2>
+            {canEditGroup ? (
+              <button type="button" className="btn btn-ghost btn-sm" onClick={openSettings}>
+                <Pencil size={14} /> Modifica
+              </button>
+            ) : null}
+          </div>
+          <div className="group-settings-grid">
+            <div className="group-setting">
+              <span>Icona</span>
+              <strong>{groupSettings.icon || 'Predefinita'}</strong>
+            </div>
+            <div className="group-setting">
+              <span>Chi può scrivere</span>
+              <strong>{labelOf(GROUP_SETTING_OPTIONS.sendMessagesPolicy, groupSettings.sendMessagesPolicy)}</strong>
+            </div>
+            <div className="group-setting">
+              <span>Chi può modificare le info</span>
+              <strong>{labelOf(GROUP_SETTING_OPTIONS.editInfoPolicy, groupSettings.editInfoPolicy)}</strong>
+            </div>
+            <div className="group-setting">
+              <span>Chi può aggiungere membri</span>
+              <strong>{labelOf(GROUP_SETTING_OPTIONS.addMembersPolicy, groupSettings.addMembersPolicy)}</strong>
+            </div>
+            <div className="group-setting">
+              <span>Approvazione nuovi membri</span>
+              <strong>
+                {group.visibility === 'private'
+                  ? groupSettings.approveNewMembers
+                    ? 'Richiesta'
+                    : 'Automatica'
+                  : 'Non necessaria'}
+              </strong>
+            </div>
+            <div className="group-setting">
+              <span>Messaggi effimeri</span>
+              <strong>{labelOf(GROUP_SETTING_OPTIONS.disappearingMessages, groupSettings.disappearingMessages)}</strong>
+            </div>
+            <div className="group-setting">
+              <span>Conservazione chat</span>
+              <strong>{retentionDaysForSetting(groupSettings.disappearingMessages)} giorni</strong>
+            </div>
+            <div className="group-setting">
+              <span>Allegati</span>
+              <strong>Solo testo ed emoji</strong>
+            </div>
+            <div className="group-setting">
+              <span>Invito</span>
+              <strong>{group.visibility === 'private' ? 'Codice o link' : 'Accesso pubblico'}</strong>
+            </div>
+          </div>
+        </section>
+      ) : null}
 
       {isBannedHere ? (
         <div className="access-denied big">
@@ -665,19 +791,23 @@ export function GroupDetail() {
                 <Link2 size={17} /> Invito
               </h2>
               {group.visibility === 'private' ? (
-                isOwner ? (
+                canReadInvite ? (
                   <>
                     <p className="small muted">
-                      Chi apre questo link entra direttamente, senza approvazione.
+                      {groupSettings.approveNewMembers
+                        ? 'Chi apre questo link deve essere approvato dal fondatore.'
+                        : 'Chi apre questo link entra direttamente, senza approvazione.'}
                     </p>
                     <code className="invite-code">{inviteCode || '…'}</code>
                     <div className="row-actions">
                       <button type="button" className="btn btn-ghost btn-sm" onClick={copyInvite}>
                         <Copy size={14} /> Copia link
                       </button>
-                      <button type="button" className="btn btn-ghost btn-sm" onClick={regenerate} disabled={busy === 'regen'}>
-                        <RefreshCw size={14} /> Rigenera
-                      </button>
+                      {isOwner ? (
+                        <button type="button" className="btn btn-ghost btn-sm" onClick={regenerate} disabled={busy === 'regen'}>
+                          <RefreshCw size={14} /> Rigenera
+                        </button>
+                      ) : null}
                     </div>
                   </>
                 ) : (
@@ -817,6 +947,169 @@ export function GroupDetail() {
             />
           </Field>
         </form>
+      </Modal>
+
+      <Modal
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        title="Impostazioni gruppo"
+        subtitle="Nome, icona, descrizione e regole della chat. Le modifiche sono immediate per tutti i membri."
+        footer={
+          <>
+            <button type="button" className="btn btn-ghost" onClick={() => setSettingsOpen(false)}>
+              Annulla
+            </button>
+            <button
+              type="submit"
+              form="group-settings-form"
+              className="btn btn-primary"
+              disabled={settingsBusy || !settingsForm}
+            >
+              {settingsBusy ? 'Salvataggio…' : 'Salva'}
+            </button>
+          </>
+        }
+      >
+        {settingsForm ? (
+          <form id="group-settings-form" className="form" onSubmit={saveSettings}>
+            <Field label="Nome del gruppo *">
+              <input
+                className="input"
+                value={settingsForm.name}
+                onChange={(event) =>
+                  setSettingsForm((prev) => ({ ...prev, name: event.target.value }))
+                }
+                required
+                minLength={3}
+                maxLength={80}
+              />
+            </Field>
+            <Field label="Descrizione" hint="Massimo 400 caratteri.">
+              <textarea
+                className="textarea"
+                rows={3}
+                value={settingsForm.description}
+                onChange={(event) =>
+                  setSettingsForm((prev) => ({ ...prev, description: event.target.value }))
+                }
+                maxLength={400}
+              />
+            </Field>
+            <Field label="Icona" hint="Usa un’emoji, ad esempio 🏐.">
+              <input
+                className="input group-icon-input"
+                value={settingsForm.icon}
+                onChange={(event) =>
+                  setSettingsForm((prev) => ({ ...prev, icon: event.target.value }))
+                }
+                maxLength={8}
+                placeholder="🏐"
+              />
+            </Field>
+
+            {canManageSettings ? (
+              <>
+                <div className="form-row">
+                  <Field label="Chi può scrivere">
+                    <select
+                      className="select"
+                      value={settingsForm.sendMessagesPolicy}
+                      onChange={(event) =>
+                        setSettingsForm((prev) => ({
+                          ...prev,
+                          sendMessagesPolicy: event.target.value,
+                        }))
+                      }
+                    >
+                      {GROUP_SETTING_OPTIONS.sendMessagesPolicy.map((option) => (
+                        <option key={option.value} value={option.value}>{option.label}</option>
+                      ))}
+                    </select>
+                  </Field>
+                  <Field label="Chi può modificare le info">
+                    <select
+                      className="select"
+                      value={settingsForm.editInfoPolicy}
+                      onChange={(event) =>
+                        setSettingsForm((prev) => ({
+                          ...prev,
+                          editInfoPolicy: event.target.value,
+                        }))
+                      }
+                    >
+                      {GROUP_SETTING_OPTIONS.editInfoPolicy.map((option) => (
+                        <option key={option.value} value={option.value}>{option.label}</option>
+                      ))}
+                    </select>
+                  </Field>
+                </div>
+
+                <div className="form-row">
+                  <Field label="Chi può aggiungere membri">
+                    <select
+                      className="select"
+                      value={settingsForm.addMembersPolicy}
+                      onChange={(event) =>
+                        setSettingsForm((prev) => ({
+                          ...prev,
+                          addMembersPolicy: event.target.value,
+                        }))
+                      }
+                    >
+                      {GROUP_SETTING_OPTIONS.addMembersPolicy.map((option) => (
+                        <option key={option.value} value={option.value}>{option.label}</option>
+                      ))}
+                    </select>
+                  </Field>
+                  <div className="field">
+                    <span className="field-label">Approvazione nuovi membri</span>
+                    <label className="check">
+                      <input
+                        type="checkbox"
+                        checked={settingsForm.approveNewMembers}
+                        onChange={(event) =>
+                          setSettingsForm((prev) => ({
+                            ...prev,
+                            approveNewMembers: event.target.checked,
+                          }))
+                        }
+                      />
+                      <span>Richiedi approvazione</span>
+                    </label>
+                    <span className="field-hint">
+                      Per i gruppi privati vale anche per chi entra dal link invito.
+                    </span>
+                  </div>
+                </div>
+
+                <Field
+                  label="Messaggi effimeri"
+                  hint="La manutenzione elimina i messaggi più vecchi del periodo scelto."
+                >
+                  <select
+                    className="select"
+                    value={settingsForm.disappearingMessages}
+                    onChange={(event) =>
+                      setSettingsForm((prev) => ({
+                        ...prev,
+                        disappearingMessages: event.target.value,
+                      }))
+                    }
+                  >
+                    {GROUP_SETTING_OPTIONS.disappearingMessages.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                </Field>
+              </>
+            ) : (
+              <p className="hint">
+                Puoi modificare nome, icona e descrizione. Le altre impostazioni sono gestite dal
+                fondatore o da un amministratore.
+              </p>
+            )}
+          </form>
+        ) : null}
       </Modal>
     </div>
   );

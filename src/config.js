@@ -39,6 +39,58 @@ export const LIMITS = {
   maxPlayers: 40,
 };
 
+export const GROUP_SETTING_OPTIONS = {
+  sendMessagesPolicy: [
+    { value: 'all', label: 'Tutti i membri' },
+    { value: 'admins', label: 'Solo fondatore e admin' },
+  ],
+  editInfoPolicy: [
+    { value: 'all', label: 'Tutti i membri' },
+    { value: 'admins', label: 'Solo fondatore e admin' },
+  ],
+  addMembersPolicy: [
+    { value: 'all', label: 'Tutti i membri' },
+    { value: 'admins', label: 'Solo fondatore e admin' },
+  ],
+  disappearingMessages: [
+    { value: 'off', label: 'Disattivati (30 giorni)' },
+    { value: '24h', label: '24 ore' },
+    { value: '7d', label: '7 giorni' },
+    { value: '90d', label: '90 giorni' },
+  ],
+};
+
+export const DEFAULT_GROUP_SETTINGS = {
+  icon: '',
+  sendMessagesPolicy: 'all',
+  editInfoPolicy: 'all',
+  addMembersPolicy: 'all',
+  approveNewMembers: false,
+  disappearingMessages: 'off',
+};
+
+export function normalizeGroupSettings(source = {}) {
+  const policy = (value) => (value === 'admins' ? 'admins' : 'all');
+  const disappearing = ['24h', '7d', '90d'].includes(source.disappearingMessages)
+    ? source.disappearingMessages
+    : 'off';
+  return {
+    icon: Array.from(String(source.icon || '').trim()).slice(0, 4).join(''),
+    sendMessagesPolicy: policy(source.sendMessagesPolicy),
+    editInfoPolicy: policy(source.editInfoPolicy),
+    addMembersPolicy: policy(source.addMembersPolicy),
+    approveNewMembers: source.approveNewMembers === true,
+    disappearingMessages: disappearing,
+  };
+}
+
+export function retentionDaysForSetting(value) {
+  if (value === '24h') return 1;
+  if (value === '7d') return 7;
+  if (value === '90d') return 90;
+  return LIMITS.messageRetentionDays;
+}
+
 export const AGE_BANDS = [
   { value: 'liceo', label: 'Liceo' },
   { value: 'universitari', label: 'Universitari' },

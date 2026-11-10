@@ -1,6 +1,6 @@
 import { serverTimestamp } from '../store/base';
 import { toDate, dateKey, pad } from '../lib/format';
-import { LIMITS } from '../config';
+import { LIMITS, retentionDaysForSetting } from '../config';
 import { expirePendingOffer } from './matches';
 
 const DAYS_AHEAD = 14;
@@ -34,19 +34,25 @@ export async function expireOverdueOffers(storeApi) {
 }
 
 export async function purgeOldMessages(storeApi) {
-  const cutoff = new Date(Date.now() - LIMITS.messageRetentionDays * 86400000);
   const groups = await storeApi.listDocs('groups', { limit: 200 });
-  const paths = ['chats/general/messages', ...groups.map((group) => `groups/${group.id}/messages`)];
+  const jobs = [
+    { path: 'chats/general/messages', days: LIMITS.messageRetentionDays },
+    ...groups.map((group) => ({
+      path: `groups/${group.id}/messages`,
+      days: retentionDaysForSetting(group.data.disappearingMessages),
+    })),
+  ];
   let deleted = 0;
 
-  for (const path of paths) {
+  for (const job of jobs) {
+    const cutoff = new Date(Date.now() - job.days * 86400000);
     for (let round = 0; round < 20; round += 1) {
-      const rows = await storeApi.listDocs(path, {
+      const rows = await storeApi.listDocs(job.path, {
         where: [['createdAt', '<', cutoff]],
         limit: 100,
       });
       if (!rows.length) break;
-      await Promise.all(rows.map((row) => storeApi.deleteDoc(`${path}/${row.id}`)));
+      await Promise.all(rows.map((row) => storeApi.deleteDoc(`${job.path}/${row.id}`)));
       deleted += rows.length;
     }
   }
