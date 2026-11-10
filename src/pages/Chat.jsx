@@ -1,5 +1,5 @@
 import { ChevronDown, ChevronLeft, MessageCircle, Timer } from 'lucide-react';
-import { Link, useLocation, useSearchParams } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { useAuth } from '../auth/AuthProvider';
 import { ChatRoom } from '../components/ChatRoom';
 import { useChatComposerDock } from '../components/ChatComposerDock';
@@ -10,9 +10,6 @@ import { LIMITS } from '../config';
 export function Chat() {
   const { uid, nickname, profile, isAdmin, isBanned, isSilenced } = useAuth();
   const { requestGroupWheel } = useChatComposerDock();
-  const [searchParams] = useSearchParams();
-  const location = useLocation();
-  const focusRequest = location.state?.focusRequest;
 
   return (
     <div className="page chat-page chat-page--full">
@@ -49,8 +46,6 @@ export function Chat() {
           currentUser={{ uid, nickname: profile?.nickname || nickname }}
           canWrite={!isBanned && !isSilenced}
           isModerator={isAdmin}
-          autoFocus={searchParams.get('focus') === '1'}
-          focusRequest={focusRequest}
           composerLabel="#generale"
           disabledReason={
             isBanned

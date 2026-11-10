@@ -66,6 +66,68 @@ export async function sendMessage({ path, author, text, replyTo = null, bannedWo
   });
 }
 
+function matchSnapshot(match = {}) {
+  return {
+    id: match.id || '',
+    title: String(match.title || 'Match aperto'),
+    sport: match.sport === 'beach' ? 'beach' : 'indoor',
+    startsAt: match.startsAt || null,
+    time: match.time || '',
+    gym: match.gym || '',
+    zone: match.zone || '',
+    cost: Number(match.cost) || 0,
+    level: match.level || 'intermedio',
+    ageBand: match.ageBand || 'universitari',
+    maxPlayers: Number(match.maxPlayers) || 0,
+    confirmedCount: Number(match.confirmedCount) || 0,
+    waitlistCount: Number(match.waitlistCount) || 0,
+    status: match.status || 'open',
+    organizerNickname: match.organizerNickname || '',
+  };
+}
+
+/** Pubblica una proposta di match nella chat generale. */
+export async function postMatchProposal({ organizer, matchId, match }) {
+  if (!organizer?.uid || !matchId) throw new Error('Dati del match non validi.');
+  return store.addDoc(generalChatPath, {
+    authorId: organizer.uid,
+    authorNickname: organizer.nickname || 'Organizzatore',
+    text: `Proposta di match: ${String(match?.title || 'nuovo match').slice(0, 160)}`,
+    createdAt: serverTimestamp(),
+    editedAt: null,
+    deleted: false,
+    deletedAt: null,
+    replyTo: null,
+    type: 'match',
+    matchId,
+    match: matchSnapshot({ ...match, id: matchId }),
+  });
+}
+
+/** Pubblica una ricerca giocatori senza esporre il nome del gruppo privato. */
+export async function postPlayerRequestProposal({ organizer, requestId, request }) {
+  if (!organizer?.uid || !requestId) throw new Error('Dati della ricerca non validi.');
+  return store.addDoc(generalChatPath, {
+    authorId: organizer.uid,
+    authorNickname: 'Gruppo privato',
+    text: 'Ricerca giocatori da gruppo privato',
+    createdAt: serverTimestamp(),
+    editedAt: null,
+    deleted: false,
+    deletedAt: null,
+    replyTo: null,
+    type: 'playerRequest',
+    requestId,
+    request: {
+      matchSummary: request.matchSummary || {},
+      neededRoles: Array.isArray(request.neededRoles) ? request.neededRoles : [],
+      slotsNeeded: Number(request.slotsNeeded) || 1,
+      note: request.note || '',
+      status: request.status || 'open',
+    },
+  });
+}
+
 export async function editMessage({ path, messageId, text, bannedWords = [] }) {
   const clean = validateText(text, bannedWords);
   await store.updateDoc(`${path}/${messageId}`, {

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
   ArrowLeft,
   Ban,
@@ -10,13 +10,17 @@ import {
   Lock,
   MessageCircle,
   RefreshCw,
+  Search,
   ShieldAlert,
   Trash2,
   UserCheck,
+  UserPlus,
   Users,
   X,
 } from 'lucide-react';
 import { useAuth } from '../auth/AuthProvider';
+import { store } from '../backend';
+import { VOLLEY_ROLES } from '../config';
 import { useAsync, useSubscription } from '../lib/hooks';
 import {
   approveMember,
@@ -33,17 +37,17 @@ import {
   subscribeMembership,
 } from '../services/groups';
 import { groupChatPath } from '../services/chat';
-import { Avatar, Chip, EmptyState, Modal, Spinner } from '../components/ui';
+import { createPlayerRequest } from '../services/playerRequests';
+import { Avatar, Chip, EmptyState, Field, Modal, Spinner } from '../components/ui';
 import { ChatRoom } from '../components/ChatRoom';
 import { PrivateGroupGate } from '../components/PrivateGroupGate';
 import { useToast } from '../components/Toast';
-import { formatDateShort } from '../lib/format';
+import { formatDateShort, toDate } from '../lib/format';
 
 export function GroupDetail() {
   const { groupId } = useParams();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const location = useLocation();
   const toast = useToast();
   const { uid, nickname, isAdmin, isBanned, isSilenced, profile } = useAuth();
 
@@ -64,15 +68,45 @@ export function GroupDetail() {
   const infoOpen = searchParams.get('tab') === 'membri';
   const focusRequested =
     searchParams.get('focus') === '1' || searchParams.get('chat') === '1';
-  const autoFocusRequested = searchParams.get('focus') === '1';
   const chatOpen = isMember && !isBannedHere && !infoOpen;
-  const focusRequest = location.state?.focusRequest;
 
   const [busy, setBusy] = useState('');
   const [inviteBusy, setInviteBusy] = useState(() => Boolean(searchParams.get('invite')));
   const [showBanModal, setShowBanModal] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [playerRequestOpen, setPlayerRequestOpen] = useState(false);
+  const [playerRequestForm, setPlayerRequestForm] = useState({
+    matchId: '',
+    slotsNeeded: 1,
+    neededRoles: [],
+    note: '',
+  });
+  const [requestBusy, setRequestBusy] = useState(false);
   const attemptedInvite = useRef(false);
+
+  const myMatchesState = useSubscription(
+    (cb) =>
+      isOwner && group?.visibility === 'private'
+        ? store.subscribeList(
+            'matches',
+            { where: [['organizerId', '==', uid]], limit: 50 },
+            cb
+          )
+        : () => {},
+    [isOwner, uid, group?.visibility]
+  );
+  const availableMatches = (myMatchesState.data || [])
+    .map((row) => ({ id: row.id, ...row.data }))
+    .filter((match) => {
+      const start = toDate(match.startsAt);
+      return (
+        match.status === 'open' &&
+        start &&
+        start.getTime() > Date.now() &&
+        (match.confirmedCount || 0) < (match.maxPlayers || 0)
+      );
+    })
+    .sort((a, b) => (toDate(a.startsAt)?.getTime() || 0) - (toDate(b.startsAt)?.getTime() || 0));
 
   const secret = useAsync(
     () => (isOwner ? getGroupSecret(groupId) : Promise.resolve(null)),
@@ -240,6 +274,59 @@ export function GroupDetail() {
     }
   };
 
+  const openPlayerRequest = () => {
+    setPlayerRequestForm({
+      matchId: availableMatches[0]?.id || '',
+      slotsNeeded: 1,
+      neededRoles: [],
+      note: '',
+    });
+    setPlayerRequestOpen(true);
+  };
+
+  const toggleNeededRole = (role) => {
+    setPlayerRequestForm((prev) => ({
+      ...prev,
+      neededRoles: prev.neededRoles.includes(role)
+        ? prev.neededRoles.filter((item) => item !== role)
+        : [...prev.neededRoles, role],
+    }));
+  };
+
+  const submitPlayerRequest = async (event) => {
+    event.preventDefault();
+    const selectedMatch = availableMatches.find((match) => match.id === playerRequestForm.matchId);
+    if (!selectedMatch) {
+      toast.error('Scegli un match aperto per cui cercare giocatori.');
+      return;
+    }
+    setRequestBusy(true);
+    try {
+      const result = await createPlayerRequest({
+        group,
+        match: selectedMatch,
+        organizer: { uid, nickname: profile?.nickname || nickname },
+        neededRoles: playerRequestForm.neededRoles,
+        slotsNeeded: playerRequestForm.slotsNeeded,
+        note: playerRequestForm.note,
+      });
+      toast.success(
+        result.chatPublished
+          ? 'Ricerca pubblicata in #generale: il nome del gruppo resta nascosto.'
+          : 'Ricerca creata, ma non pubblicata in chat: controlla le regole Firestore.'
+      );
+      setPlayerRequestOpen(false);
+    } catch (error) {
+      toast.error(
+        error?.code === 'permission-denied'
+          ? 'Permessi insufficienti: pubblica le regole Firestore aggiornate.'
+          : error.message || 'Ricerca non pubblicata.'
+      );
+    } finally {
+      setRequestBusy(false);
+    }
+  };
+
   const removeGroup = async () => {
     setBusy('delete');
     try {
@@ -325,8 +412,6 @@ export function GroupDetail() {
             currentUser={{ uid, nickname: profile?.nickname || nickname }}
             canWrite={canChat}
             isModerator={isOwner || isAdmin}
-            autoFocus={autoFocusRequested}
-            focusRequest={focusRequest}
             composerLabel={group.name}
             disabledReason={
               isBanned
@@ -545,6 +630,36 @@ export function GroupDetail() {
           </section>
 
           <aside className="detail-side">
+            {isOwner && group.visibility === 'private' ? (
+              <section className="card card-pad player-search-card">
+                <h2 className="card-title">
+                  <UserPlus size={17} /> Cerca giocatori
+                </h2>
+                <p className="small muted">
+                  Pubblica in #generale solo data, palestra e ruoli mancanti. Il nome del gruppo e
+                  il link al match non compaiono nella chat.
+                </p>
+                <button
+                  type="button"
+                  className="btn btn-primary btn-block btn-sm"
+                  onClick={openPlayerRequest}
+                  disabled={availableMatches.length === 0}
+                >
+                  <Search size={15} /> Nuova ricerca
+                </button>
+                {availableMatches.length === 0 ? (
+                  <p className="hint">
+                    Ti serve un match aperto con posti liberi.{' '}
+                    <Link to="/match/nuovo">Organizzane uno</Link>.
+                  </p>
+                ) : (
+                  <p className="hint">
+                    Le candidature arrivano qui: le approvi dalla card in #generale.
+                  </p>
+                )}
+              </section>
+            ) : null}
+
             <section className="card card-pad">
               <h2 className="card-title">
                 <Link2 size={17} /> Invito
@@ -609,6 +724,99 @@ export function GroupDetail() {
         }
       >
         <p className="muted">Se vuoi solo chiudere le iscrizioni, non è necessario eliminarlo.</p>
+      </Modal>
+
+      <Modal
+        open={playerRequestOpen}
+        onClose={() => setPlayerRequestOpen(false)}
+        title="Cerca giocatori"
+        subtitle="La chat generale mostrerà “Ricerca giocatori da gruppo privato”: nome del gruppo e link al match restano riservati."
+        footer={
+          <>
+            <button type="button" className="btn btn-ghost" onClick={() => setPlayerRequestOpen(false)}>
+              Annulla
+            </button>
+            <button
+              type="submit"
+              form="player-request-form"
+              className="btn btn-primary"
+              disabled={requestBusy || !playerRequestForm.matchId}
+            >
+              <UserPlus size={16} /> {requestBusy ? 'Pubblicazione…' : 'Pubblica ricerca'}
+            </button>
+          </>
+        }
+      >
+        <form id="player-request-form" className="form" onSubmit={submitPlayerRequest}>
+          <Field label="Match per cui cerchi giocatori *">
+            <select
+              className="select"
+              value={playerRequestForm.matchId}
+              onChange={(event) =>
+                setPlayerRequestForm((prev) => ({ ...prev, matchId: event.target.value }))
+              }
+              required
+            >
+              <option value="">Scegli un match…</option>
+              {availableMatches.map((match) => (
+                <option key={match.id} value={match.id}>
+                  {formatDateShort(match.startsAt)} · {match.time} · {match.gym}
+                </option>
+              ))}
+            </select>
+          </Field>
+          {availableMatches.length === 0 ? (
+            <p className="hint">
+              Non hai match aperti con posti liberi. <Link to="/match/nuovo">Organizza un match</Link>.
+            </p>
+          ) : null}
+
+          <div className="form-row">
+            <Field label="Giocatori mancanti">
+              <input
+                className="input"
+                type="number"
+                min="1"
+                max="8"
+                value={playerRequestForm.slotsNeeded}
+                onChange={(event) =>
+                  setPlayerRequestForm((prev) => ({ ...prev, slotsNeeded: event.target.value }))
+                }
+              />
+            </Field>
+            <div className="field">
+              <span className="field-label">Ruoli cercati</span>
+              <div className="role-checks">
+                {VOLLEY_ROLES.map((role) => (
+                  <label key={role.value} className="check">
+                    <input
+                      type="checkbox"
+                      checked={playerRequestForm.neededRoles.includes(role.value)}
+                      onChange={() => toggleNeededRole(role.value)}
+                    />
+                    <span>{role.label}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <Field
+            label="Nota pubblica"
+            hint="Massimo 400 caratteri. Non inserire nome del gruppo, contatti o dati personali."
+          >
+            <textarea
+              className="textarea"
+              rows={3}
+              maxLength={400}
+              value={playerRequestForm.note}
+              onChange={(event) =>
+                setPlayerRequestForm((prev) => ({ ...prev, note: event.target.value }))
+              }
+              placeholder="Es. cerchiamo un centrale per una partita amichevole, livello intermedio…"
+            />
+          </Field>
+        </form>
       </Modal>
     </div>
   );

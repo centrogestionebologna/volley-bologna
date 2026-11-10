@@ -11,6 +11,7 @@ import {
   HeartHandshake,
   Hourglass,
   MapPin,
+  Megaphone,
   Pencil,
   ShieldAlert,
   Star,
@@ -27,6 +28,7 @@ import {
   cancelSignup,
   confirmSeat,
   declineSeat,
+  publishMatchToChat,
   removeParticipant,
   setMatchStatus,
   signUpForMatch,
@@ -233,6 +235,26 @@ export function MatchDetail() {
     run('close', () => setMatchStatus(matchId, 'closed'), 'Iscrizioni chiuse.');
   };
 
+  const publishToGeneralChat = async () => {
+    setBusy('publish');
+    try {
+      const result = await publishMatchToChat({
+        matchId,
+        match,
+        organizer: { uid, nickname: profile?.nickname || nickname },
+      });
+      toast.success(
+        result.created
+          ? 'Match pubblicato nella chat generale.'
+          : 'Questo match è già nella chat generale.'
+      );
+    } catch (error) {
+      toast.error(error.message || 'Pubblicazione non riuscita.');
+    } finally {
+      setBusy('');
+    }
+  };
+
   if (matchState.loading) return <Spinner />;
   if (!match) {
     return (
@@ -334,6 +356,15 @@ export function MatchDetail() {
               <Link to={`/match/${matchId}/modifica`} className="btn btn-ghost btn-sm">
                 <Pencil size={15} /> Modifica
               </Link>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={publishToGeneralChat}
+                disabled={Boolean(match.chatMessageId) || busy === 'publish'}
+                title={match.chatMessageId ? 'Già pubblicato in #generale' : 'Pubblica in #generale'}
+              >
+                <Megaphone size={15} /> {match.chatMessageId ? 'In #generale' : 'Pubblica in #generale'}
+              </button>
               {match.status === 'open' ? (
                 <button type="button" className="btn btn-ghost btn-sm" onClick={closeSignups}>
                   Chiudi iscrizioni

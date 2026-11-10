@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Flag, Loader2, Pencil, Reply, Send, Smile, Trash2, X } from 'lucide-react';
 import { Avatar, Modal } from './ui';
+import { MatchProposalCard, PlayerRequestCard } from './ChatProposal';
 import { EmojiPicker } from './EmojiPicker';
 import { useToast } from './Toast';
 import { useChatComposerDock } from './ChatComposerDock';
@@ -52,8 +53,6 @@ export function ChatRoom({
   canWrite,
   disabledReason,
   isModerator = false,
-  autoFocus = false,
-  focusRequest = null,
   composerLabel = 'questa chat',
 }) {
   const toast = useToast();
@@ -80,16 +79,6 @@ export function ChatRoom({
     setComposerActive(isMobile);
     return () => setComposerActive(false);
   }, [isMobile, setComposerActive]);
-
-  useEffect(() => {
-    if ((!autoFocus && !focusRequest) || !canWrite) return undefined;
-    const frame = requestAnimationFrame(() => {
-      inputRef.current?.focus({ preventScroll: true });
-      const body = bodyRef.current;
-      if (body) body.scrollTop = body.scrollHeight;
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [autoFocus, canWrite, focusRequest, path, composerSlot, isMobile]);
 
   useEffect(() => {
     const viewport = window.visualViewport;
@@ -408,18 +397,19 @@ export function ChatRoom({
           const showDay =
             !previous || dayLabel(previous.createdAt) !== dayLabel(message.createdAt);
           const own = message.authorId === currentUser.uid;
-          const canEdit = own && !message.deleted;
-          const canDelete = (own || isModerator) && !message.deleted;
-          const canReport = !own && !message.deleted;
-          const hasActions =
-            canDelete || (canWrite && !message.deleted) || canReport;
+          const isProposal = message.type === 'match' || message.type === 'playerRequest';
+          const canEdit = own && !message.deleted && !isProposal;
+          const canDelete = (isModerator || (own && !isProposal)) && !message.deleted;
+          const canReport = !own && !message.deleted && !isProposal;
+          const canReply = canWrite && !message.deleted && !isProposal;
+          const hasActions = canDelete || canReply || canReport;
           const actionsOpen = activeMessageId === message.id;
 
           return (
             <div key={message.id}>
               {showDay ? <div className="day-divider">{dayLabel(message.createdAt)}</div> : null}
               <div
-                className={`msg ${own ? 'own' : ''} ${actionsOpen ? 'actions-open' : ''}`}
+                className={`msg ${own ? 'own' : ''} ${isProposal ? 'msg-proposal' : ''} ${actionsOpen ? 'actions-open' : ''}`}
                 onClick={
                   hasActions
                     ? (event) => {
@@ -445,7 +435,7 @@ export function ChatRoom({
                 {!own ? <Avatar name={message.authorNickname} size="sm" /> : null}
                 <div className="msg-content">
                   {!own ? <span className="msg-author">{message.authorNickname}</span> : null}
-                  <div className={`msg-bubble ${message.deleted ? 'deleted' : ''}`}>
+                  <div className={`msg-bubble ${message.deleted ? 'deleted' : ''} ${isProposal ? 'msg-bubble-proposal' : ''}`}>
                     {message.replyTo ? (
                       <div className="msg-quote">
                         <strong>{message.replyTo.nickname}</strong>
@@ -454,6 +444,12 @@ export function ChatRoom({
                     ) : null}
                     {message.deleted ? (
                       <p className="msg-deleted">Questo messaggio è stato eliminato</p>
+                    ) : isProposal ? (
+                      message.type === 'match' ? (
+                        <MatchProposalCard message={message} />
+                      ) : (
+                        <PlayerRequestCard message={message} currentUser={currentUser} />
+                      )
                     ) : (
                       <p className="msg-text">{message.text}</p>
                     )}
@@ -466,7 +462,7 @@ export function ChatRoom({
                     className="msg-actions"
                     onClick={(event) => event.stopPropagation()}
                   >
-                    {canWrite && !message.deleted ? (
+                    {canReply ? (
                       <button type="button" onClick={() => startReply(message)} aria-label="Rispondi" title="Rispondi">
                         <Reply size={14} />
                       </button>

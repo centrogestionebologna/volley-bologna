@@ -91,6 +91,36 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/identityAccess/$(uid() + '_' + userId)).data.expiresAt > request.time;
     }
 
+    function playerRequestExists(id) {
+      return exists(/databases/$(database)/documents/playerRequests/$(id));
+    }
+
+    function playerRequestData(id) {
+      return get(/databases/$(database)/documents/playerRequests/$(id)).data;
+    }
+
+    function isPlayerRequestOrganizer(id) {
+      return signedIn() && playerRequestExists(id) && playerRequestData(id).organizerId == uid();
+    }
+
+    function applicationExists(requestId, applicantId) {
+      return exists(
+        /databases/$(database)/documents/playerRequests/$(requestId)/applications/$(applicantId)
+      );
+    }
+
+    function applicationData(requestId, applicantId) {
+      return get(
+        /databases/$(database)/documents/playerRequests/$(requestId)/applications/$(applicantId)
+      ).data;
+    }
+
+    function isApprovedApplicant(requestId) {
+      return signedIn()
+        && applicationExists(requestId, uid())
+        && applicationData(requestId, uid()).status == 'approved';
+    }
+
     // ── Profili ─────────────────────────────────────────────────────────────
     match /users/{userId} {
       allow get: if isSelf(userId) || isAdmin() || hasIdentityAccess(userId);
@@ -309,10 +339,26 @@ service cloud.firestore {
         && request.resource.data.deleted == false
         && request.resource.data.text is string
         && request.resource.data.text.size() > 0
-        && request.resource.data.text.size() <= 1200;
+        && request.resource.data.text.size() <= 1200
+        && (
+          !('type' in request.resource.data)
+          || (
+            request.resource.data.type == 'match'
+            && request.resource.data.matchId is string
+            && matchExists(request.resource.data.matchId)
+            && matchData(request.resource.data.matchId).organizerId == uid()
+          )
+          || (
+            request.resource.data.type == 'playerRequest'
+            && request.resource.data.requestId is string
+            && playerRequestExists(request.resource.data.requestId)
+            && playerRequestData(request.resource.data.requestId).organizerId == uid()
+          )
+        );
       allow update: if isAdmin()
         || (
           signedIn()
+          && !('type' in resource.data)
           && resource.data.authorId == uid()
           && resource.data.deleted == false
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
@@ -324,6 +370,42 @@ service cloud.firestore {
           )
         );
       allow delete: if isAdmin();
+    }
+
+    // ── Ricerca giocatori da gruppi privati ─────────────────────────────────
+    // Il documento è visibile all'organizzatore e a chi è stato approvato.
+    // Il nome del gruppo non viene copiato né mostrato nella chat generale.
+    match /playerRequests/{requestId} {
+      allow get: if isAdmin()
+        || isPlayerRequestOrganizer(requestId)
+        || isApprovedApplicant(requestId);
+      allow list: if false;
+      allow create: if canWrite()
+        && request.resource.data.organizerId == uid()
+        && groupExists(request.resource.data.groupId)
+        && isGroupOwner(request.resource.data.groupId)
+        && groupData(request.resource.data.groupId).visibility == 'private'
+        && matchExists(request.resource.data.matchId)
+        && matchData(request.resource.data.matchId).organizerId == uid()
+        && request.resource.data.status == 'open';
+      allow update: if isAdmin() || isPlayerRequestOrganizer(requestId);
+      allow delete: if isAdmin() || isPlayerRequestOrganizer(requestId);
+    }
+
+    match /playerRequests/{requestId}/applications/{applicantId} {
+      allow get: if isAdmin()
+        || isPlayerRequestOrganizer(requestId)
+        || isSelf(applicantId);
+      allow list: if isAdmin() || isPlayerRequestOrganizer(requestId);
+      allow create: if canWrite()
+        && applicantId == uid()
+        && request.resource.data.uid == uid()
+        && request.resource.data.status == 'pending'
+        && playerRequestExists(requestId)
+        && playerRequestData(requestId).status == 'open'
+        && playerRequestData(requestId).organizerId != uid();
+      allow update: if isAdmin() || isPlayerRequestOrganizer(requestId);
+      allow delete: if isAdmin() || isSelf(applicantId);
     }
 
     // ── Reputazione (privata per organizzatore) ─────────────────────────────

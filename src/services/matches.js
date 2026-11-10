@@ -2,6 +2,7 @@ import { store } from '../backend';
 import { serverTimestamp } from '../store/base';
 import { LIMITS } from '../config';
 import { toDate, dateKey, timeKey } from '../lib/format';
+import { postMatchProposal } from './chat';
 
 const OFFER_MS = LIMITS.offerMinutes * 60 * 1000;
 const HOUR_MS = 3600000;
@@ -301,9 +302,23 @@ export async function createMatch(input, organizer, { recurring = false } = {}) 
     pendingOfferUid: null,
     status: 'open',
     recurringId: null,
+    chatMessageId: null,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
+
+  // Ogni nuova proposta finisce subito nella chat generale, così la vede tutta
+  // la community e può aprirla per iscriversi.
+  try {
+    const messageId = await postMatchProposal({
+      organizer,
+      matchId,
+      match: { ...data, organizerNickname: organizer.nickname, confirmedCount: 0, waitlistCount: 0, status: 'open' },
+    });
+    await store.updateDoc(`matches/${matchId}`, { chatMessageId: messageId });
+  } catch (error) {
+    console.warn('Match creato ma non pubblicato nella chat generale', error?.message);
+  }
 
   if (recurring) {
     await store.setDoc(`recurringMatches/${`rec-${matchId}`}`, {
@@ -330,6 +345,14 @@ export async function createMatch(input, organizer, { recurring = false } = {}) 
   }
 
   return matchId;
+}
+
+export async function publishMatchToChat({ matchId, match, organizer }) {
+  if (!matchId || !organizer?.uid) throw new Error('Match non valido.');
+  if (match?.chatMessageId) return { created: false, messageId: match.chatMessageId };
+  const messageId = await postMatchProposal({ organizer, matchId, match });
+  await store.updateDoc(`matches/${matchId}`, { chatMessageId: messageId });
+  return { created: true, messageId };
 }
 
 export async function updateMatch(matchId, input) {

@@ -52,4 +52,12 @@ export const LEVELS = [
   { value: 'agonistico', label: 'Agonistico' },
 ];
 
+export const VOLLEY_ROLES = [
+  { value: 'palleggiatore', label: 'Palleggiatore' },
+  { value: 'schiacciatore', label: 'Schiacciatore' },
+  { value: 'centrale', label: 'Centrale' },
+  { value: 'opposto', label: 'Opposto' },
+  { value: 'libero', label: 'Libero' },
+];
+
 export const labelOf = (list, value) => list.find((item) => item.value === value)?.label || value;

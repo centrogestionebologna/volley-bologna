@@ -1,32 +1,38 @@
 import { Link } from 'react-router-dom';
 import {
   ArrowRight,
+  CalendarDays,
   ClipboardList,
-  Flame,
   MessageCircle,
-  Sparkles,
-  Trophy,
+  Plus,
+  Search,
   UserRound,
   Users,
+  Volleyball,
 } from 'lucide-react';
 import { useAuth } from '../auth/AuthProvider';
 import { store } from '../backend';
 import { useAsync } from '../lib/hooks';
-import { Chip, EmptyState, Spinner } from '../components/ui';
+import { Spinner } from '../components/ui';
 import { formatDateShort, toDate } from '../lib/format';
 import { listMyRegistrations } from '../services/matches';
 
-const HOME_ACTIONS = [
-  { key: 'match', to: '/match', icon: ClipboardList, title: 'Trova un match' },
-  { key: 'organizza', to: '/match/nuovo', icon: Sparkles, title: 'Organizza' },
-  { key: 'impegni', href: '#impegni', icon: Trophy, title: 'I tuoi impegni' },
-  { key: 'chat', to: '/chat?focus=1', icon: MessageCircle, title: 'Chat generale' },
-  { key: 'gruppi', to: '/gruppi', icon: Users, title: 'Gruppi' },
-  { key: 'profilo', to: '/profilo', icon: UserRound, title: 'Profilo' },
-];
+function registrationLabel(reg) {
+  if (!reg) return '';
+  if (reg.status === 'confirmed') return 'Iscritto';
+  if (reg.status === 'offered') return 'Conferma il posto';
+  return 'In riserva';
+}
+
+function registrationTone(reg) {
+  if (!reg) return 'free';
+  if (reg.status === 'confirmed') return 'confirmed';
+  if (reg.status === 'offered') return 'offered';
+  return 'waitlist';
+}
 
 export function Home() {
-  const { uid } = useAuth();
+  const { uid, nickname } = useAuth();
 
   const matchesState = useAsync(
     () => store.listDocs('matches', { where: [['status', '==', 'open']], limit: 50 }),
@@ -41,137 +47,188 @@ export function Home() {
 
   const myRegs = useAsync(() => (uid ? listMyRegistrations(uid) : Promise.resolve([])), [uid]);
   const regMap = new Map((myRegs.data || []).map((row) => [row.match.id, row.reg]));
-  const myUpcoming = (myRegs.data || []).slice(0, 3);
+  const myUpcoming = (myRegs.data || [])
+    .filter((row) => {
+      const start = toDate(row.match?.startsAt);
+      return start && start.getTime() > Date.now();
+    })
+    .sort(
+      (a, b) =>
+        (toDate(a.match?.startsAt)?.getTime() || 0) - (toDate(b.match?.startsAt)?.getTime() || 0)
+    );
+  const next = myUpcoming[0];
+  const firstName = String(nickname || 'giocatore').split(/\s+/)[0];
 
   return (
-    <div className="page home-page">
-      <section className="home-actions-section" aria-labelledby="home-actions-title">
-        <div className="section-head">
-          <h2 id="home-actions-title">Cosa vuoi fare?</h2>
+    <div className="page home-page home-page--dark">
+      <section className="home-dark-hero">
+        <div className="home-dark-hero-copy">
+          <span className="eyebrow">Bologna · community pallavolo</span>
+          <h1>
+            Ciao, <span>{firstName}</span>.
+          </h1>
+          <p>
+            Trova una partita, organizza il prossimo match o entra nella chat della community.
+            Tutto quello che serve, in un posto solo.
+          </p>
+          <div className="home-dark-actions">
+            <Link to="/match" className="home-dark-btn home-dark-btn-primary">
+              <Search size={18} /> Trova un match
+            </Link>
+            <Link to="/match/nuovo" className="home-dark-btn home-dark-btn-ghost">
+              <Plus size={18} /> Organizza
+            </Link>
+          </div>
         </div>
-        <div className="home-actions">
-          {HOME_ACTIONS.map((action) => {
-            const Icon = action.icon;
-            const content = (
-              <>
-                <span className="home-action-icon">
-                  <Icon size={20} />
-                </span>
-                <strong className="home-action-title">{action.title}</strong>
-              </>
-            );
-
-            return action.href ? (
-              <a key={action.key} href={action.href} className="home-action">
-                {content}
-              </a>
-            ) : (
-              <Link key={action.key} to={action.to} className="home-action">
-                {content}
-              </Link>
-            );
-          })}
+        <div className="home-dark-hero-art" aria-hidden="true">
+          <Volleyball size={128} strokeWidth={1.1} />
+          <span>Gioca. Connettiti. Torna in campo.</span>
         </div>
       </section>
 
-      <section className="card card-pad">
-        <div className="section-head">
-          <h2>
-            <ClipboardList size={18} /> Prossimi match
-          </h2>
-          <Link to="/match" className="link-more">
+      <div className="home-dark-grid">
+        <section className="home-dark-card">
+          <div className="home-dark-section-head">
+            <div>
+              <span className="home-dark-kicker">Il prossimo appuntamento</span>
+              <h2>Il tuo match</h2>
+            </div>
+            <Link to="/profilo" className="home-dark-more">
+              I tuoi impegni <ArrowRight size={15} />
+            </Link>
+          </div>
+
+          {myRegs.loading ? (
+            <Spinner label="Caricamento del prossimo match…" />
+          ) : next ? (
+            <Link to={`/match/${next.match.id}`} className="home-dark-next">
+              <span className="home-dark-next-icon">
+                <CalendarDays size={22} />
+              </span>
+              <span className="home-dark-next-copy">
+                <strong>{next.match.title}</strong>
+                <small>
+                  {formatDateShort(next.match.startsAt)} · {next.match.time} · {next.match.gym}
+                </small>
+              </span>
+              <span className={`home-dark-status ${registrationTone(next.reg)}`}>
+                {registrationLabel(next.reg)}
+              </span>
+            </Link>
+          ) : (
+            <div className="home-dark-empty">
+              <TrophyIcon />
+              <div>
+                <strong>Nessun match in agenda</strong>
+                <p>Iscriviti a un match aperto: se è pieno entri in lista riserva.</p>
+              </div>
+              <Link to="/match" className="home-dark-inline-link">
+                Cerca <ArrowRight size={14} />
+              </Link>
+            </div>
+          )}
+        </section>
+
+        <section className="home-dark-card">
+          <div className="home-dark-section-head">
+            <div>
+              <span className="home-dark-kicker">Sempre a portata</span>
+              <h2>Community</h2>
+            </div>
+          </div>
+          <div className="home-dark-links">
+            <Link to="/chat?focus=1" className="home-dark-link">
+              <span className="home-dark-link-icon">
+                <MessageCircle size={19} />
+              </span>
+              <span>
+                <strong>Chat generale</strong>
+                <small>Proposte match, ricerche e community</small>
+              </span>
+              <ArrowRight size={16} />
+            </Link>
+            <Link to="/gruppi" className="home-dark-link">
+              <span className="home-dark-link-icon">
+                <Users size={19} />
+              </span>
+              <span>
+                <strong>Gruppi</strong>
+                <small>Pubblici o privati, con chat dedicata</small>
+              </span>
+              <ArrowRight size={16} />
+            </Link>
+            <Link to="/profilo" className="home-dark-link">
+              <span className="home-dark-link-icon">
+                <UserRound size={19} />
+              </span>
+              <span>
+                <strong>Profilo</strong>
+                <small>Nickname, dati e verifica</small>
+              </span>
+              <ArrowRight size={16} />
+            </Link>
+          </div>
+        </section>
+      </div>
+
+      <section className="home-dark-card">
+        <div className="home-dark-section-head">
+          <div>
+            <span className="home-dark-kicker">Prossime partite</span>
+            <h2>Match aperti</h2>
+          </div>
+          <Link to="/match" className="home-dark-more">
             Vedi tutti <ArrowRight size={15} />
           </Link>
         </div>
+
         {matchesState.loading ? (
           <Spinner label="Caricamento match…" />
         ) : upcoming.length === 0 ? (
-          <EmptyState
-            icon={ClipboardList}
-            title="Nessun match in programma"
-            text="Pubblica il primo match e invita la community."
-          >
-            <Link to="/match/nuovo" className="btn btn-primary btn-sm">
-              Crea un match
+          <div className="home-dark-empty">
+            <span className="home-dark-empty-icon">
+              <ClipboardList size={22} />
+            </span>
+            <div>
+              <strong>Nessun match in programma</strong>
+              <p>Pubblica il primo match e invita la community.</p>
+            </div>
+            <Link to="/match/nuovo" className="home-dark-inline-link">
+              Crea <ArrowRight size={14} />
             </Link>
-          </EmptyState>
+          </div>
         ) : (
-          <ul className="compact-list home-match-list">
+          <div className="home-dark-match-list">
             {upcoming.slice(0, 4).map((row) => {
               const match = { id: row.id, ...row.data };
               const myReg = regMap.get(match.id);
               const full = (match.confirmedCount || 0) >= match.maxPlayers;
               return (
-                <li key={match.id}>
-                  <Link to={`/match/${match.id}`} className="home-match-row">
-                    <div>
-                      <strong>{match.title}</strong>
-                      <small>
-                        {formatDateShort(match.startsAt)} · {match.time} · {match.gym}
-                      </small>
-                    </div>
-                    {myReg ? (
-                      <Chip
-                        tone={
-                          myReg.status === 'confirmed'
-                            ? 'green'
-                            : myReg.status === 'offered'
-                              ? 'amber'
-                              : 'blue'
-                        }
-                      >
-                        {myReg.status === 'confirmed'
-                          ? 'Iscritto'
-                          : myReg.status === 'offered'
-                            ? 'Conferma il posto'
-                            : 'In riserva'}
-                      </Chip>
-                    ) : (
-                      <Chip tone={full ? 'amber' : 'green'}>{full ? 'Pieno' : 'Posti liberi'}</Chip>
-                    )}
-                  </Link>
-                </li>
+                <Link key={match.id} to={`/match/${match.id}`} className="home-dark-match">
+                  <span className="home-dark-match-main">
+                    <strong>{match.title}</strong>
+                    <small>
+                      {formatDateShort(match.startsAt)} · {match.time} · {match.gym}
+                    </small>
+                  </span>
+                  <span className={`home-dark-status ${registrationTone(myReg)}`}>
+                    {myReg ? registrationLabel(myReg) : full ? 'Pieno' : 'Posti liberi'}
+                  </span>
+                  <ArrowRight size={16} />
+                </Link>
               );
             })}
-          </ul>
-        )}
-      </section>
-
-      <section id="impegni" className="card card-pad home-anchor">
-        <div className="section-head">
-          <h2>
-            <Flame size={18} /> I tuoi impegni
-          </h2>
-          <Link to="/profilo" className="link-more">
-            Dettagli <ArrowRight size={15} />
-          </Link>
-        </div>
-        {myRegs.loading ? (
-          <Spinner />
-        ) : myUpcoming.length === 0 ? (
-          <EmptyState
-            icon={Trophy}
-            title="Non hai ancora un match"
-            text="Iscriviti a un match aperto: se è pieno entri automaticamente in lista riserva."
-          />
-        ) : (
-          <ul className="compact-list">
-            {myUpcoming.map(({ match, reg }) => (
-              <li key={match.id}>
-                <div>
-                  <strong>{match.title}</strong>
-                  <small>
-                    {formatDateShort(match.startsAt)} · {match.time} · {match.gym}
-                  </small>
-                </div>
-                <Chip tone={reg.status === 'confirmed' ? 'green' : reg.status === 'offered' ? 'amber' : 'blue'}>
-                  {reg.status === 'confirmed' ? 'Iscritto' : reg.status === 'offered' ? 'Conferma il posto' : 'In riserva'}
-                </Chip>
-              </li>
-            ))}
-          </ul>
+          </div>
         )}
       </section>
     </div>
+  );
+}
+
+function TrophyIcon() {
+  return (
+    <span className="home-dark-empty-icon">
+      <CalendarDays size={22} />
+    </span>
   );
 }

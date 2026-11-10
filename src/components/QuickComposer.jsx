@@ -113,7 +113,9 @@ export function QuickComposer() {
 
   const openChat = () => {
     setWheelOpen(false);
-    navigate(chatPath, { state: { focusRequest: Date.now() } });
+    // Apre solo la conversazione: la tastiera parte quando l'utente
+    // tocca di nuovo la barra ormai diventata composer.
+    navigate(chatPath);
   };
 
   return (
