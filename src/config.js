@@ -69,17 +69,18 @@ export const DEFAULT_GROUP_SETTINGS = {
   disappearingMessages: 'off',
 };
 
-export function normalizeGroupSettings(source = {}) {
+export function normalizeGroupSettings(source) {
+  const raw = source && typeof source === 'object' ? source : {};
   const policy = (value) => (value === 'admins' ? 'admins' : 'all');
-  const disappearing = ['24h', '7d', '90d'].includes(source.disappearingMessages)
-    ? source.disappearingMessages
+  const disappearing = ['24h', '7d', '90d'].includes(raw.disappearingMessages)
+    ? raw.disappearingMessages
     : 'off';
   return {
-    icon: Array.from(String(source.icon || '').trim()).slice(0, 4).join(''),
-    sendMessagesPolicy: policy(source.sendMessagesPolicy),
-    editInfoPolicy: policy(source.editInfoPolicy),
-    addMembersPolicy: policy(source.addMembersPolicy),
-    approveNewMembers: source.approveNewMembers === true,
+    icon: Array.from(String(raw.icon || '').trim()).slice(0, 4).join(''),
+    sendMessagesPolicy: policy(raw.sendMessagesPolicy),
+    editInfoPolicy: policy(raw.editInfoPolicy),
+    addMembersPolicy: policy(raw.addMembersPolicy),
+    approveNewMembers: raw.approveNewMembers === true,
     disappearingMessages: disappearing,
   };
 }
