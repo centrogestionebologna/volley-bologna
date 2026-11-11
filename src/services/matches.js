@@ -2,19 +2,25 @@ import { store } from '../backend';
 import { serverTimestamp } from '../store/base';
 import { LIMITS } from '../config';
 import { toDate, dateKey, timeKey } from '../lib/format';
-import { postMatchProposal } from './chat';
+import { postMatchProposal, postMatchProposalToGroup } from './chat';
 
 const OFFER_MS = LIMITS.offerMinutes * 60 * 1000;
 const HOUR_MS = 3600000;
 
 export const regPath = (matchId, uid) => `matches/${matchId}/registrations/${uid}`;
 
-export function listUpcomingMatches({ limit = 60 } = {}) {
-  return store.listDocs('matches', {
-    where: [['status', '==', 'open']],
-    orderBy: [['startsAt', 'asc']],
-    limit,
-  });
+export function listUpcomingMatches({ limit = 60, includeGroupPrivate = false } = {}) {
+  return store
+    .listDocs('matches', {
+      where: [['status', '==', 'open']],
+      orderBy: [['startsAt', 'asc']],
+      limit,
+    })
+    .then((rows) =>
+      includeGroupPrivate
+        ? rows
+        : rows.filter((row) => row.data.visibility !== 'group-private')
+    );
 }
 
 export function subscribeMatch(matchId, callback) {
@@ -257,7 +263,7 @@ export async function declineSeat({ matchId, uid }) {
 }
 
 function normalizeMatchInput(input) {
-  const startsAt = input.startsAt instanceof Date ? input.startsAt : new Date(input.startsAt);
+  const startsAt = toDate(input.startsAt) || new Date(input.startsAt);
   if (Number.isNaN(startsAt.getTime())) throw new Error('Data e ora non valide.');
   if (startsAt.getTime() < Date.now()) throw new Error('La data del match è nel passato.');
   if (!input.gym?.trim()) throw new Error('Indica la palestra o la zona.');
@@ -289,12 +295,28 @@ function normalizeMatchInput(input) {
   };
 }
 
-export async function createMatch(input, organizer, { recurring = false } = {}) {
+export async function createMatch(
+  input,
+  organizer,
+  { recurring = false, recurrence = null, group = null } = {}
+) {
+  if (group?.id) {
+    const membership = await store.getDoc(`groups/${group.id}/members/${organizer.uid}`);
+    if (membership?.data?.status !== 'active') {
+      throw new Error('Solo i membri attivi possono proporre un match in questo gruppo.');
+    }
+  }
+
   const data = normalizeMatchInput(input);
+  const isGroupPrivate = group?.visibility === 'private';
   const matchId = await store.addDoc('matches', {
     ...data,
     organizerId: organizer.uid,
     organizerNickname: organizer.nickname,
+    groupId: group?.id || null,
+    groupName: group?.name || '',
+    groupVisibility: group?.visibility || null,
+    visibility: isGroupPrivate ? 'group-private' : 'public',
     confirmedCount: 0,
     waitlistCount: 0,
     registrationSeq: 0,
@@ -307,26 +329,58 @@ export async function createMatch(input, organizer, { recurring = false } = {}) 
     updatedAt: serverTimestamp(),
   });
 
-  // Ogni nuova proposta finisce subito nella chat generale, così la vede tutta
-  // la community e può aprirla per iscriversi.
-  try {
-    const messageId = await postMatchProposal({
-      organizer,
-      matchId,
-      match: { ...data, organizerNickname: organizer.nickname, confirmedCount: 0, waitlistCount: 0, status: 'open' },
-    });
-    await store.updateDoc(`matches/${matchId}`, { chatMessageId: messageId });
-  } catch (error) {
-    console.warn('Match creato ma non pubblicato nella chat generale', error?.message);
+  if (group?.id) {
+    try {
+      await postMatchProposalToGroup({
+        groupId: group.id,
+        organizer,
+        matchId,
+        match: {
+          ...data,
+          organizerNickname: organizer.nickname,
+          confirmedCount: 0,
+          waitlistCount: 0,
+          status: 'open',
+        },
+      });
+    } catch (error) {
+      console.warn('Match creato ma non pubblicato nella chat del gruppo', error?.message);
+    }
+  }
+
+  // Solo i match pubblici finiscono nella chat generale.
+  if (!isGroupPrivate) {
+    try {
+      const messageId = await postMatchProposal({
+        organizer,
+        matchId,
+        match: {
+          ...data,
+          organizerNickname: organizer.nickname,
+          confirmedCount: 0,
+          waitlistCount: 0,
+          status: 'open',
+        },
+      });
+      await store.updateDoc(`matches/${matchId}`, { chatMessageId: messageId });
+    } catch (error) {
+      console.warn('Match creato ma non pubblicato nella chat generale', error?.message);
+    }
   }
 
   if (recurring) {
+    const frequency = ['weekly', 'biweekly', 'monthly'].includes(recurrence?.frequency)
+      ? recurrence.frequency
+      : 'weekly';
+    const approvalMode = recurrence?.approvalMode === 'founder' ? 'founder' : 'auto';
     await store.setDoc(`recurringMatches/${`rec-${matchId}`}`, {
       organizerId: organizer.uid,
       organizerNickname: organizer.nickname,
       title: data.title,
       sport: data.sport,
       weekday: data.startsAt.getDay(),
+      anchorDate: data.date,
+      anchorDay: data.startsAt.getDate(),
       time: data.time,
       gym: data.gym,
       zone: data.zone,
@@ -337,6 +391,12 @@ export async function createMatch(input, organizer, { recurring = false } = {}) 
       deadlineHours: data.deadlineHours,
       description: data.description,
       sourceMatchId: matchId,
+      groupId: group?.id || null,
+      groupName: group?.name || '',
+      groupVisibility: group?.visibility || null,
+      visibility: isGroupPrivate ? 'group-private' : 'public',
+      frequency,
+      approvalMode,
       active: true,
       lastPublishedDate: null,
       createdAt: serverTimestamp(),
@@ -349,6 +409,9 @@ export async function createMatch(input, organizer, { recurring = false } = {}) 
 
 export async function publishMatchToChat({ matchId, match, organizer }) {
   if (!matchId || !organizer?.uid) throw new Error('Match non valido.');
+  if (match?.visibility === 'group-private') {
+    throw new Error('I match dei gruppi privati non vengono pubblicati nella chat generale.');
+  }
   if (match?.chatMessageId) return { created: false, messageId: match.chatMessageId };
   const messageId = await postMatchProposal({ organizer, matchId, match });
   await store.updateDoc(`matches/${matchId}`, { chatMessageId: messageId });
@@ -384,8 +447,53 @@ export async function deleteRecurringRule(ruleId) {
   await store.deleteDoc(`recurringMatches/${ruleId}`);
 }
 
+export function subscribeRecurringApprovals(organizerId, callback) {
+  return store.subscribeList(
+    'recurringApprovals',
+    {
+      where: [
+        ['organizerId', '==', organizerId],
+        ['status', '==', 'pending'],
+      ],
+      orderBy: [['proposedAt', 'asc']],
+      limit: 50,
+    },
+    callback
+  );
+}
+
+/** Approva una riproposta: crea il match e lo pubblica secondo la visibilità del gruppo. */
+export async function approveRecurringApproval({ approval, organizer }) {
+  const source = approval?.data;
+  if (!approval?.id || !source?.match) throw new Error('Riproposta non valida.');
+  if (source.status !== 'pending') throw new Error('Questa riproposta è già stata gestita.');
+  const group = source.groupId
+    ? {
+        id: source.groupId,
+        name: source.groupName || 'Gruppo',
+        visibility: source.visibility === 'group-private' ? 'private' : 'public',
+      }
+    : null;
+  const matchId = await createMatch(source.match, organizer, { group });
+  await store.updateDoc(`recurringApprovals/${approval.id}`, {
+    status: 'approved',
+    matchId,
+    reviewedAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+  return matchId;
+}
+
+export async function rejectRecurringApproval({ approvalId }) {
+  await store.updateDoc(`recurringApprovals/${approvalId}`, {
+    status: 'rejected',
+    reviewedAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+}
+
 export async function listMyRegistrations(uid) {
-  const matches = await listUpcomingMatches({ limit: 30 });
+  const matches = await listUpcomingMatches({ limit: 30, includeGroupPrivate: true });
   const rows = await Promise.all(
     matches.map(async (match) => {
       const reg = await store.getDoc(regPath(match.id, uid));

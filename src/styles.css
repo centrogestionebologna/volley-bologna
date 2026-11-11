@@ -982,6 +982,22 @@ textarea {
   line-height: 1.4;
 }
 
+.recurring-advanced {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 14px;
+  background: #fbfcfe;
+  display: grid;
+  gap: 10px;
+}
+
+.recurring-advanced .hint {
+  margin: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
 /* ── Home ───────────────────────────────────────────────────────────────── */
 
 .home-hero {
@@ -4345,6 +4361,16 @@ html.chat-mode-active body {
 
 .chat-head-action:hover {
   background: #dbe7fb;
+}
+
+@media (max-width: 640px) {
+  .chat-head-action span {
+    display: none;
+  }
+
+  .chat-head-action {
+    padding: 7px;
+  }
 }
 
 .chat-head-switch {

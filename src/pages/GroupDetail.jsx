@@ -10,6 +10,7 @@ import {
   Lock,
   MessageCircle,
   Pencil,
+  Plus,
   RefreshCw,
   Search,
   Settings,
@@ -472,6 +473,15 @@ export function GroupDetail() {
                 {group.name}
               </Link>
             </div>
+            {isMember && !isBannedHere && !isBanned && !isSilenced ? (
+              <Link
+                to={`/match/nuovo?groupId=${groupId}`}
+                className="chat-head-action"
+                title="Proponi un match al gruppo"
+              >
+                <Plus size={16} /> <span>Proponi match</span>
+              </Link>
+            ) : null}
           </header>
           <ChatRoom
             path={groupChatPath(groupId)}

@@ -34,6 +34,7 @@ export function Matches() {
     return (state.data || [])
       .map((row) => ({ id: row.id, ...row.data }))
       .filter((match) => {
+        if (match.visibility === 'group-private') return false;
         if (level !== 'all' && match.level !== level) return false;
         if (ageBand !== 'all' && match.ageBand !== ageBand) return false;
         if (onlyFree) {

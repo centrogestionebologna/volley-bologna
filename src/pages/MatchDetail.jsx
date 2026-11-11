@@ -356,15 +356,17 @@ export function MatchDetail() {
               <Link to={`/match/${matchId}/modifica`} className="btn btn-ghost btn-sm">
                 <Pencil size={15} /> Modifica
               </Link>
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm"
-                onClick={publishToGeneralChat}
-                disabled={Boolean(match.chatMessageId) || busy === 'publish'}
-                title={match.chatMessageId ? 'Già pubblicato in #generale' : 'Pubblica in #generale'}
-              >
-                <Megaphone size={15} /> {match.chatMessageId ? 'In #generale' : 'Pubblica in #generale'}
-              </button>
+              {match.visibility === 'group-private' ? null : (
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={publishToGeneralChat}
+                  disabled={Boolean(match.chatMessageId) || busy === 'publish'}
+                  title={match.chatMessageId ? 'Già pubblicato in #generale' : 'Pubblica in #generale'}
+                >
+                  <Megaphone size={15} /> {match.chatMessageId ? 'In #generale' : 'Pubblica in #generale'}
+                </button>
+              )}
               {match.status === 'open' ? (
                 <button type="button" className="btn btn-ghost btn-sm" onClick={closeSignups}>
                   Chiudi iscrizioni
@@ -426,9 +428,14 @@ export function MatchDetail() {
               ))}
             </div>
             {match.description ? <p className="match-description">{match.description}</p> : null}
+            {match.visibility === 'group-private' ? (
+              <Chip tone="muted" icon={CalendarClock}>
+                Match del gruppo privato{match.groupName ? `: ${match.groupName}` : ''}
+              </Chip>
+            ) : null}
             {match.recurringId ? (
               <Chip tone="violet" icon={CalendarClock}>
-                Match ricorrente settimanale
+                Match ricorrente
               </Chip>
             ) : null}
           </section>

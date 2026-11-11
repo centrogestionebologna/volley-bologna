@@ -3,17 +3,33 @@ import { toDate, dateKey, pad } from '../lib/format';
 import { LIMITS, retentionDaysForSetting } from '../config';
 import { expirePendingOffer } from './matches';
 
-const DAYS_AHEAD = 14;
+const DAYS_AHEAD = 31;
 
-function upcomingWeekdayDates(weekday, daysAhead = DAYS_AHEAD) {
+function upcomingDates(daysAhead = DAYS_AHEAD) {
   const dates = [];
   const cursor = new Date();
   cursor.setHours(0, 0, 0, 0);
   for (let i = 0; i <= daysAhead; i += 1) {
-    if (cursor.getDay() === weekday) dates.push(new Date(cursor));
+    dates.push(new Date(cursor));
     cursor.setDate(cursor.getDate() + 1);
   }
   return dates;
+}
+
+function matchesCadence(rule, date) {
+  const frequency = rule.frequency || 'weekly';
+  if (frequency === 'monthly') {
+    const anchorDay = Number(rule.anchorDay) || 1;
+    return date.getDate() === anchorDay;
+  }
+  if (frequency === 'biweekly') {
+    const anchor = rule.anchorDate ? new Date(`${rule.anchorDate}T00:00:00`) : null;
+    if (!anchor || Number.isNaN(anchor.getTime())) return date.getDay() === rule.weekday;
+    const start = Date.UTC(anchor.getFullYear(), anchor.getMonth(), anchor.getDate());
+    const current = Date.UTC(date.getFullYear(), date.getMonth(), date.getDate());
+    return Math.floor((current - start) / 604800000) % 2 === 0;
+  }
+  return date.getDay() === rule.weekday;
 }
 
 export async function expireOverdueOffers(storeApi) {
@@ -72,47 +88,83 @@ export async function publishRecurringMatches(storeApi) {
       .split(':')
       .map((value) => Number(value));
 
-    for (const day of upcomingWeekdayDates(rule.weekday)) {
+    const daysAhead = rule.frequency === 'monthly' ? 31 : 14;
+    for (const day of upcomingDates(daysAhead)) {
+      if (!matchesCadence(rule, day)) continue;
       const startsAt = new Date(day);
       startsAt.setHours(Number.isFinite(hours) ? hours : 20, Number.isFinite(minutes) ? minutes : 0, 0, 0);
       if (startsAt.getTime() < Date.now() + 3600000) continue;
 
-      const matchId = `${ruleDoc.id}_${dateKey(startsAt)}`;
-      const existing = await storeApi.getDoc(`matches/${matchId}`);
+      const docId = `${ruleDoc.id}_${dateKey(startsAt)}`;
+      const deadlineHours = rule.deadlineHours ?? 6;
+      const matchData = {
+        title: rule.title,
+        sport: rule.sport || 'indoor',
+        startsAt,
+        date: dateKey(startsAt),
+        time: `${pad(startsAt.getHours())}:${pad(startsAt.getMinutes())}`,
+        deadlineHours,
+        deadlineAt: new Date(startsAt.getTime() - deadlineHours * 3600000),
+        gym: rule.gym,
+        zone: rule.zone || '',
+        cost: rule.cost || 0,
+        level: rule.level,
+        maxPlayers: rule.maxPlayers,
+        ageBand: rule.ageBand,
+        description: rule.description || '',
+        organizerId: rule.organizerId,
+        organizerNickname: rule.organizerNickname,
+        groupId: rule.groupId || null,
+        groupName: rule.groupName || '',
+        groupVisibility: rule.groupVisibility || null,
+        visibility: rule.visibility || 'public',
+        confirmedCount: 0,
+        waitlistCount: 0,
+        registrationSeq: 0,
+        pendingOffer: null,
+        pendingOfferUid: null,
+        status: 'open',
+        recurringId: ruleDoc.id,
+        chatMessageId: null,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      };
+
+      if (rule.approvalMode === 'founder') {
+        const approvalId = docId;
+        const existingMatch = await storeApi.getDoc(`matches/${docId}`);
+        if (existingMatch) continue;
+        const existingApproval = await storeApi.getDoc(`recurringApprovals/${approvalId}`);
+        if (existingApproval) continue;
+        try {
+          await storeApi.setDoc(`recurringApprovals/${approvalId}`, {
+            ruleId: ruleDoc.id,
+            organizerId: rule.organizerId,
+            organizerNickname: rule.organizerNickname || '',
+            groupId: rule.groupId || null,
+            groupName: rule.groupName || '',
+            visibility: rule.visibility || 'public',
+            status: 'pending',
+            proposedAt: serverTimestamp(),
+            match: matchData,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          });
+        } catch (error) {
+          console.warn('Riproposta non accodata', approvalId, error?.message);
+        }
+        continue;
+      }
+
+      const existing = await storeApi.getDoc(`matches/${docId}`);
       if (existing) continue;
 
       try {
-        await storeApi.setDoc(`matches/${matchId}`, {
-          title: rule.title,
-          sport: rule.sport || 'indoor',
-          startsAt,
-          date: dateKey(startsAt),
-          time: `${pad(startsAt.getHours())}:${pad(startsAt.getMinutes())}`,
-          deadlineHours: rule.deadlineHours ?? 6,
-          deadlineAt: new Date(startsAt.getTime() - (rule.deadlineHours ?? 6) * 3600000),
-          gym: rule.gym,
-          zone: rule.zone || '',
-          cost: rule.cost || 0,
-          level: rule.level,
-          maxPlayers: rule.maxPlayers,
-          ageBand: rule.ageBand,
-          description: rule.description || '',
-          organizerId: rule.organizerId,
-          organizerNickname: rule.organizerNickname,
-          confirmedCount: 0,
-          waitlistCount: 0,
-          registrationSeq: 0,
-          pendingOffer: null,
-          pendingOfferUid: null,
-          status: 'open',
-          recurringId: ruleDoc.id,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        });
+        await storeApi.setDoc(`matches/${docId}`, matchData);
         created += 1;
       } catch (error) {
         // Se il cron e un altro processo creano lo stesso match, il secondo fallisce: ignorabile.
-        console.warn('Pubblicazione ricorrenza saltata', matchId, error?.message);
+        console.warn('Pubblicazione ricorrenza saltata', docId, error?.message);
       }
     }
 

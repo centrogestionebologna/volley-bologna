@@ -169,7 +169,27 @@ service cloud.firestore {
     // ── Match ───────────────────────────────────────────────────────────────
     match /matches/{matchId} {
       allow read: if signedIn();
-      allow create: if canWrite() && request.resource.data.organizerId == uid();
+      allow create: if canWrite()
+        && request.resource.data.organizerId == uid()
+        && (
+          !request.resource.data.keys().hasAll(['groupId'])
+          || request.resource.data.groupId == null
+          || (
+            request.resource.data.groupId is string
+            && groupExists(request.resource.data.groupId)
+            && isActiveMember(request.resource.data.groupId)
+          )
+        )
+        && (
+          !request.resource.data.keys().hasAll(['visibility'])
+          || request.resource.data.visibility != 'group-private'
+          || (
+            request.resource.data.groupId is string
+            && groupExists(request.resource.data.groupId)
+            && groupData(request.resource.data.groupId).visibility == 'private'
+            && isActiveMember(request.resource.data.groupId)
+          )
+        );
       allow update: if isAdmin()
         || isMatchOrganizer(matchId)
         || (
@@ -207,9 +227,46 @@ service cloud.firestore {
 
     match /recurringMatches/{ruleId} {
       allow read: if signedIn();
-      allow create: if canWrite() && request.resource.data.organizerId == uid();
+      allow create: if canWrite()
+        && request.resource.data.organizerId == uid()
+        && (
+          !request.resource.data.keys().hasAll(['groupId'])
+          || request.resource.data.groupId == null
+          || (
+            request.resource.data.groupId is string
+            && groupExists(request.resource.data.groupId)
+            && isActiveMember(request.resource.data.groupId)
+          )
+        )
+        && (
+          !('frequency' in request.resource.data)
+          || request.resource.data.frequency in ['weekly', 'biweekly', 'monthly']
+        )
+        && (
+          !('approvalMode' in request.resource.data)
+          || request.resource.data.approvalMode in ['auto', 'founder']
+        );
       allow update: if isAdmin() || (signedIn() && resource.data.organizerId == uid());
       allow delete: if isAdmin() || (signedIn() && resource.data.organizerId == uid());
+    }
+
+    // Coda delle riproposte che richiedono l'approvazione del fondatore.
+    // La creazione avviene solo dal cron con service account.
+    match /recurringApprovals/{approvalId} {
+      allow read: if isAdmin()
+        || (signedIn() && resource.data.organizerId == uid());
+      allow create: if false;
+      allow update: if isAdmin()
+        || (
+          signedIn()
+          && resource.data.organizerId == uid()
+          && request.resource.data.status in ['approved', 'rejected']
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'status', 'matchId', 'reviewedAt', 'updatedAt'
+          ])
+        );
+      allow delete: if isAdmin()
+        || (signedIn() && resource.data.organizerId == uid());
     }
 
     // ── Gruppi ──────────────────────────────────────────────────────────────
@@ -369,6 +426,13 @@ service cloud.firestore {
           || groupData(groupId).sendMessagesPolicy == 'all'
           || isGroupOwner(groupId)
           || isAdmin()
+          || (
+            request.resource.data.type == 'match'
+            && request.resource.data.matchId is string
+            && matchExists(request.resource.data.matchId)
+            && matchData(request.resource.data.matchId).organizerId == uid()
+            && matchData(request.resource.data.matchId).groupId == groupId
+          )
         )
         && request.resource.data.authorId == uid()
         && request.resource.data.deleted == false
@@ -413,6 +477,10 @@ service cloud.firestore {
             && request.resource.data.matchId is string
             && matchExists(request.resource.data.matchId)
             && matchData(request.resource.data.matchId).organizerId == uid()
+            && (
+              !matchData(request.resource.data.matchId).keys().hasAll(['visibility'])
+              || matchData(request.resource.data.matchId).visibility != 'group-private'
+            )
           )
           || (
             request.resource.data.type == 'playerRequest'

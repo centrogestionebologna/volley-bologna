@@ -104,6 +104,24 @@ export async function postMatchProposal({ organizer, matchId, match }) {
   });
 }
 
+/** Pubblica una proposta di match nella chat del gruppo. */
+export async function postMatchProposalToGroup({ groupId, organizer, matchId, match }) {
+  if (!groupId || !organizer?.uid || !matchId) throw new Error('Dati del match non validi.');
+  return store.addDoc(groupChatPath(groupId), {
+    authorId: organizer.uid,
+    authorNickname: organizer.nickname || 'Organizzatore',
+    text: `Proposta di match: ${String(match?.title || 'nuovo match').slice(0, 160)}`,
+    createdAt: serverTimestamp(),
+    editedAt: null,
+    deleted: false,
+    deletedAt: null,
+    replyTo: null,
+    type: 'match',
+    matchId,
+    match: matchSnapshot({ ...match, id: matchId }),
+  });
+}
+
 /** Pubblica una ricerca giocatori senza esporre il nome del gruppo privato. */
 export async function postPlayerRequestProposal({ organizer, requestId, request }) {
   if (!organizer?.uid || !requestId) throw new Error('Dati della ricerca non validi.');

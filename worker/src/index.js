@@ -148,6 +148,19 @@ async function purgeMessages(env, db, now) {
   return deleted;
 }
 
+function recurringOccurs(data, day) {
+  const frequency = data.frequency || 'weekly';
+  if (frequency === 'monthly') {
+    return day.getUTCDate() === (Number(data.anchorDay) || 1);
+  }
+  if (frequency === 'biweekly') {
+    const anchor = data.anchorDate ? Date.parse(`${data.anchorDate}T00:00:00Z`) : NaN;
+    if (!Number.isFinite(anchor)) return day.getUTCDay() === data.weekday;
+    return Math.floor((day.getTime() - anchor) / (7 * DAY_MS)) % 2 === 0;
+  }
+  return day.getUTCDay() === data.weekday;
+}
+
 async function publishRecurring(env, db, now) {
   const rules = await db.query('recurringMatches', { where: ['active', '==', true], limit: 100 });
   const today = romeParts(new Date(now));
@@ -162,9 +175,10 @@ async function publishRecurring(env, db, now) {
     const hours = Number.isFinite(rawHours) ? rawHours : 20;
     const minutes = Number.isFinite(rawMinutes) ? rawMinutes : 0;
 
-    for (let offset = 0; offset <= 14; offset += 1) {
+    const daysAhead = data.frequency === 'monthly' ? 31 : 14;
+    for (let offset = 0; offset <= daysAhead; offset += 1) {
       const day = new Date(base + offset * DAY_MS);
-      if (day.getUTCDay() !== data.weekday) continue;
+      if (!recurringOccurs(data, day)) continue;
 
       const startsAt = romeToUtc(
         day.getUTCFullYear(),
@@ -175,43 +189,77 @@ async function publishRecurring(env, db, now) {
       );
       if (startsAt.getTime() < now + 3600000) continue;
 
-      const matchId = `${rule.id}_${dateKey(day)}`;
-      const existing = await db.getDoc(`matches/${matchId}`);
+      const docId = `${rule.id}_${dateKey(day)}`;
+      const deadlineHours = data.deadlineHours ?? 6;
+      const matchData = {
+        title: data.title || `Volley a ${data.gym}`,
+        sport: data.sport || 'indoor',
+        startsAt,
+        date: dateKey(day),
+        time: `${pad(hours)}:${pad(minutes)}`,
+        deadlineHours,
+        deadlineAt: new Date(startsAt.getTime() - deadlineHours * 3600000),
+        gym: data.gym || '',
+        zone: data.zone || '',
+        cost: data.cost || 0,
+        level: data.level || 'intermedio',
+        maxPlayers: data.maxPlayers || 12,
+        ageBand: data.ageBand || 'universitari',
+        description: data.description || '',
+        organizerId: data.organizerId,
+        organizerNickname: data.organizerNickname || '',
+        groupId: data.groupId || null,
+        groupName: data.groupName || '',
+        groupVisibility: data.groupVisibility || null,
+        visibility: data.visibility || 'public',
+        confirmedCount: 0,
+        waitlistCount: 0,
+        registrationSeq: 0,
+        pendingOffer: null,
+        pendingOfferUid: null,
+        status: 'open',
+        recurringId: rule.id,
+        chatMessageId: null,
+        createdAt: new Date(now),
+        updatedAt: new Date(now),
+      };
+
+      if (data.approvalMode === 'founder') {
+        const existingMatch = await db.getDoc(`matches/${docId}`);
+        if (existingMatch) continue;
+        const existingApproval = await db.getDoc(`recurringApprovals/${docId}`);
+        if (existingApproval) continue;
+        try {
+          await db.create(`recurringApprovals/${docId}`, {
+            ruleId: rule.id,
+            organizerId: data.organizerId,
+            organizerNickname: data.organizerNickname || '',
+            groupId: data.groupId || null,
+            groupName: data.groupName || '',
+            visibility: data.visibility || 'public',
+            status: 'pending',
+            proposedAt: new Date(now),
+            match: matchData,
+            createdAt: new Date(now),
+            updatedAt: new Date(now),
+          });
+        } catch (error) {
+          if (error.status !== 409) {
+            console.warn(`Riproposta ${docId} non accodata`, error.message);
+          }
+        }
+        continue;
+      }
+
+      const existing = await db.getDoc(`matches/${docId}`);
       if (existing) continue;
 
-      const deadlineHours = data.deadlineHours ?? 6;
       try {
-        await db.create(`matches/${matchId}`, {
-          title: data.title || `Volley a ${data.gym}`,
-          sport: data.sport || 'indoor',
-          startsAt,
-          date: dateKey(day),
-          time: `${pad(hours)}:${pad(minutes)}`,
-          deadlineHours,
-          deadlineAt: new Date(startsAt.getTime() - deadlineHours * 3600000),
-          gym: data.gym || '',
-          zone: data.zone || '',
-          cost: data.cost || 0,
-          level: data.level || 'intermedio',
-          maxPlayers: data.maxPlayers || 12,
-          ageBand: data.ageBand || 'universitari',
-          description: data.description || '',
-          organizerId: data.organizerId,
-          organizerNickname: data.organizerNickname || '',
-          confirmedCount: 0,
-          waitlistCount: 0,
-          registrationSeq: 0,
-          pendingOffer: null,
-          pendingOfferUid: null,
-          status: 'open',
-          recurringId: rule.id,
-          createdAt: new Date(now),
-          updatedAt: new Date(now),
-        });
+        await db.create(`matches/${docId}`, matchData);
         created += 1;
       } catch (error) {
         if (error.status !== 409 && error.status !== 400) {
-          console.warn(`Ricorrenza ${matchId} non pubblicata`, error.message);
+          console.warn(`Ricorrenza ${docId} non pubblicata`, error.message);
         }
       }
     }

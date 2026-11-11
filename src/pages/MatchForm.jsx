@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, CalendarClock, Loader2, Sparkles } from 'lucide-react';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { ArrowLeft, CalendarClock, Info, Loader2, Lock, Sparkles, Users } from 'lucide-react';
 import { useAuth } from '../auth/AuthProvider';
 import { store } from '../backend';
 import { AGE_BANDS, LEVELS, LIMITS } from '../config';
 import { createMatch, updateMatch } from '../services/matches';
+import { getGroup, getMembership } from '../services/groups';
 import { dateKey, timeKey, toDate } from '../lib/format';
 import { useAsync } from '../lib/hooks';
 import { Field, PageHead, Spinner } from '../components/ui';
@@ -34,12 +35,16 @@ function tomorrow() {
 export function MatchForm() {
   const { matchId } = useParams();
   const editing = Boolean(matchId);
+  const [searchParams] = useSearchParams();
+  const groupId = editing ? '' : searchParams.get('groupId') || '';
   const navigate = useNavigate();
   const toast = useToast();
   const { uid, nickname, profile, isAdmin } = useAuth();
 
   const [form, setForm] = useState({ ...emptyForm, date: tomorrow(), time: '20:30' });
   const [recurring, setRecurring] = useState(false);
+  const [recurrenceFrequency, setRecurrenceFrequency] = useState('weekly');
+  const [recurrenceApproval, setRecurrenceApproval] = useState('auto');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
@@ -47,6 +52,18 @@ export function MatchForm() {
     () => (editing ? store.getDoc(`matches/${matchId}`) : Promise.resolve(null)),
     [matchId, editing]
   );
+  const groupState = useAsync(
+    () => (groupId ? getGroup(groupId) : Promise.resolve(null)),
+    [groupId]
+  );
+  const membershipState = useAsync(
+    () => (groupId && uid ? getMembership(groupId, uid) : Promise.resolve(null)),
+    [groupId, uid]
+  );
+  const group = groupState.data ? { id: groupState.data.id, ...groupState.data.data } : null;
+  const groupMembership = membershipState.data?.data || null;
+  const groupLoading = Boolean(groupId) && (!uid || groupState.loading || membershipState.loading);
+  const groupAllowed = !groupId || groupMembership?.status === 'active';
 
   useEffect(() => {
     if (!existing.data) return;
@@ -76,6 +93,14 @@ export function MatchForm() {
     event.preventDefault();
     setError('');
     if (!canEdit) return;
+    if (groupId && !group) {
+      setError('Gruppo non trovato.');
+      return;
+    }
+    if (groupId && !groupAllowed) {
+      setError('Solo i membri attivi possono proporre un match in questo gruppo.');
+      return;
+    }
     setBusy(true);
     try {
       const startsAt = new Date(`${form.date}T${form.time || '20:00'}`);
@@ -92,9 +117,27 @@ export function MatchForm() {
         toast.success('Match aggiornato.');
         navigate(`/match/${matchId}`);
       } else {
-        const id = await createMatch(payload, { uid, nickname }, { recurring });
-        toast.success(recurring ? 'Match creato: verrà ripubblicato ogni settimana.' : 'Match creato!');
-        navigate(`/match/${id}`);
+        const targetGroup = groupId ? group : null;
+        const id = await createMatch(payload, { uid, nickname }, {
+          recurring,
+          recurrence: { frequency: recurrenceFrequency, approvalMode: recurrenceApproval },
+          group: targetGroup,
+        });
+        if (targetGroup) {
+          toast.success(
+            targetGroup.visibility === 'private'
+              ? 'Proposta inviata al gruppo: non sarà pubblicata nella chat generale.'
+              : 'Match proposto al gruppo e pubblicato anche in #generale.'
+          );
+          navigate(`/gruppi/${groupId}?focus=1`);
+        } else {
+          toast.success(
+            recurring
+              ? 'Match creato: la ripubblicazione è programmata.'
+              : 'Match creato!'
+          );
+          navigate(`/match/${id}`);
+        }
       }
     } catch (err) {
       setError(err.message || 'Impossibile salvare il match.');
@@ -104,6 +147,18 @@ export function MatchForm() {
   };
 
   if (editing && existing.loading) return <Spinner />;
+  if (groupLoading) return <Spinner />;
+  if (groupId && (!group || !groupAllowed)) {
+    return (
+      <div className="page">
+        <p className="access-denied">
+          {group
+            ? 'Solo i membri attivi possono proporre un match in questo gruppo.'
+            : 'Questo gruppo non esiste o non è più accessibile.'}
+        </p>
+      </div>
+    );
+  }
   if (editing && existing.data && !canEdit) {
     return (
       <div className="page">
@@ -114,14 +169,37 @@ export function MatchForm() {
 
   return (
     <div className="page page-narrow">
-      <Link to={editing ? `/match/${matchId}` : '/match'} className="back-link">
+      <Link
+        to={editing ? `/match/${matchId}` : groupId ? `/gruppi/${groupId}?focus=1` : '/match'}
+        className="back-link"
+      >
         <ArrowLeft size={15} /> Indietro
       </Link>
       <PageHead
-        eyebrow={editing ? 'Modifica' : 'Nuovo match'}
-        title={editing ? 'Aggiorna il match' : 'Organizza un match'}
-        sub="I campi contrassegnati sono obbligatori. Potrai modificare tutto tranne i partecipanti già iscritti."
+        eyebrow={editing ? 'Modifica' : groupId ? 'Proposta al gruppo' : 'Nuovo match'}
+        title={editing ? 'Aggiorna il match' : groupId ? 'Proponi un match' : 'Organizza un match'}
+        sub={
+          groupId
+            ? 'La proposta sarà visibile ai membri del gruppo. Potrai gestire iscritti e dettagli come un normale match.'
+            : 'I campi contrassegnati sono obbligatori. Potrai modificare tutto tranne i partecipanti già iscritti.'
+        }
       />
+
+      {group ? (
+        <div className={`banner ${group.visibility === 'private' ? 'banner-warn' : ''}`}>
+          {group.visibility === 'private' ? <Lock size={18} /> : <Users size={18} />}
+          <div>
+            <strong>
+              {group.visibility === 'private' ? 'Gruppo privato' : 'Gruppo pubblico'}: {group.name}
+            </strong>
+            <span>
+              {group.visibility === 'private'
+                ? 'La proposta apparirà solo nella chat del gruppo: non sarà pubblicata in #generale né negli elenchi pubblici.'
+                : 'La proposta apparirà nella chat del gruppo, in #generale e nell’elenco dei match aperti.'}
+            </span>
+          </div>
+        </div>
+      ) : null}
 
       <form className="card card-pad form" onSubmit={submit}>
         <Field label="Titolo (facoltativo)" hint="Se vuoto generiamo “Volley a …”">
@@ -215,19 +293,59 @@ export function MatchForm() {
         </Field>
 
         {!editing ? (
-          <label className="recurring-toggle">
-            <input type="checkbox" checked={recurring} onChange={(event) => setRecurring(event.target.checked)} />
-            <span className="recurring-icon">
-              <CalendarClock size={20} />
-            </span>
-            <span>
-              <strong>Ripubblica automaticamente ogni settimana</strong>
-              <small>
-                Ogni {['domenica', 'lunedì', 'martedì', 'mercoledì', 'giovedì', 'venerdì', 'sabato'][new Date(`${form.date}T${form.time || '20:00'}`).getDay()] || 'settimana'} alle{' '}
-                {form.time} creeremo il nuovo match con gli stessi dati (14 giorni di anticipo, via Cloudflare Cron).
-              </small>
-            </span>
-          </label>
+          <>
+            <label className="recurring-toggle">
+              <input
+                type="checkbox"
+                checked={recurring}
+                onChange={(event) => setRecurring(event.target.checked)}
+              />
+              <span className="recurring-icon">
+                <CalendarClock size={20} />
+              </span>
+              <span>
+                <strong>Programma la ripubblicazione</strong>
+                <small>
+                  Ogni {['domenica', 'lunedì', 'martedì', 'mercoledì', 'giovedì', 'venerdì', 'sabato'][new Date(`${form.date}T${form.time || '20:00'}`).getDay()] || 'settimana'} alle{' '}
+                  {form.time} creeremo il nuovo match con gli stessi dati. Scegli cadenza e approvazione qui sotto.
+                </small>
+              </span>
+            </label>
+
+            {recurring ? (
+              <div className="recurring-advanced">
+                <div className="form-row">
+                  <Field label="Cadenza">
+                    <select
+                      className="select"
+                      value={recurrenceFrequency}
+                      onChange={(event) => setRecurrenceFrequency(event.target.value)}
+                    >
+                      <option value="weekly">Ogni settimana</option>
+                      <option value="biweekly">Ogni 2 settimane</option>
+                      <option value="monthly">Ogni mese</option>
+                    </select>
+                  </Field>
+                  <Field label="Ripubblicazione">
+                    <select
+                      className="select"
+                      value={recurrenceApproval}
+                      onChange={(event) => setRecurrenceApproval(event.target.value)}
+                    >
+                      <option value="auto">Automatica</option>
+                      <option value="founder">Con approvazione del fondatore</option>
+                    </select>
+                  </Field>
+                </div>
+                <p className="hint">
+                  <Info size={14} />{' '}
+                  {recurrenceApproval === 'founder'
+                    ? 'Ogni ricorrenza genera una richiesta nell’area organizer: il match verrà creato solo dopo l’approvazione del fondatore.'
+                    : 'Il match verrà creato automaticamente alla cadenza scelta, senza ulteriori conferme.'}
+                </p>
+              </div>
+            ) : null}
+          </>
         ) : null}
 
         {profile && !profile.verified ? (
@@ -240,12 +358,15 @@ export function MatchForm() {
         {error ? <div className="form-error">{error}</div> : null}
 
         <div className="form-actions">
-          <Link to={editing ? `/match/${matchId}` : '/match'} className="btn btn-ghost">
+          <Link
+            to={editing ? `/match/${matchId}` : groupId ? `/gruppi/${groupId}?focus=1` : '/match'}
+            className="btn btn-ghost"
+          >
             Annulla
           </Link>
           <button type="submit" className="btn btn-primary" disabled={busy}>
             {busy ? <Loader2 size={16} className="spin" /> : null}
-            {editing ? 'Salva modifiche' : 'Pubblica match'}
+            {editing ? 'Salva modifiche' : groupId ? 'Invia proposta' : 'Pubblica match'}
           </button>
         </div>
       </form>

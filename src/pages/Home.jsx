@@ -40,6 +40,7 @@ export function Home() {
   );
   const upcoming = (matchesState.data || [])
     .filter((row) => {
+      if (row.data.visibility === 'group-private') return false;
       const start = toDate(row.data.startsAt);
       return start && start.getTime() > Date.now();
     })

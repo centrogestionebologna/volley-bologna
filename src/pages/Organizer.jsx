@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import {
   CalendarClock,
   CalendarDays,
+  Check,
   HeartHandshake,
   Plus,
   Search,
@@ -11,16 +12,32 @@ import {
   Trash2,
   UserPlus,
   Users,
+  X,
 } from 'lucide-react';
 import { useAuth } from '../auth/AuthProvider';
 import { store } from '../backend';
 import { useAsync, useSubscription } from '../lib/hooks';
 import { listPublicProfiles } from '../services/profiles';
 import { subscribeTrusted, subscribeRatings, setTrusted } from '../services/reputation';
-import { deleteRecurringRule, toggleRecurringRule } from '../services/matches';
+import {
+  approveRecurringApproval,
+  deleteRecurringRule,
+  rejectRecurringApproval,
+  subscribeRecurringApprovals,
+  toggleRecurringRule,
+} from '../services/matches';
 import { Avatar, Chip, EmptyState, Field, Modal, PageHead, Spinner } from '../components/ui';
 import { useToast } from '../components/Toast';
 import { formatDateShort } from '../lib/format';
+
+const WEEKDAYS = ['domenica', 'lunedì', 'martedì', 'mercoledì', 'giovedì', 'venerdì', 'sabato'];
+
+function cadenceLabel(rule) {
+  const frequency = rule.frequency || 'weekly';
+  if (frequency === 'monthly') return `Ogni mese (giorno ${rule.anchorDay || 1})`;
+  if (frequency === 'biweekly') return `Ogni 2 settimane (${WEEKDAYS[rule.weekday] || 'settimana'})`;
+  return `Ogni settimana (${WEEKDAYS[rule.weekday] || 'settimana'})`;
+}
 
 export function Organizer() {
   const { uid, nickname } = useAuth();
@@ -51,12 +68,18 @@ export function Organizer() {
     [uid]
   );
 
+  const approvalsState = useSubscription(
+    (cb) => subscribeRecurringApprovals(uid, cb),
+    [uid]
+  );
+
   const trustedState = useSubscription((cb) => subscribeTrusted(uid, cb), [uid]);
   const ratingsState = useSubscription((cb) => subscribeRatings(uid, cb), [uid]);
 
   const trusted = (trustedState.data || []).map((row) => ({ userId: row.id, ...row.data }));
   const ratings = (ratingsState.data || []).map((row) => ({ userId: row.id, ...row.data }));
   const matches = myMatches.data || [];
+  const approvals = approvalsState.data || [];
   const ratingAverage = ratings.length
     ? (ratings.reduce((sum, item) => sum + (item.score || 0), 0) / ratings.length).toFixed(1)
     : '—';
@@ -131,6 +154,30 @@ export function Organizer() {
     }
   };
 
+  const approveApproval = async (approval) => {
+    setBusy(`approve-${approval.id}`);
+    try {
+      await approveRecurringApproval({ approval, organizer: { uid, nickname } });
+      toast.success('Riproposta approvata: match pubblicato.');
+    } catch (error) {
+      toast.error(error.message || 'Approvazione non riuscita.');
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const rejectApproval = async (approval) => {
+    setBusy(`reject-${approval.id}`);
+    try {
+      await rejectRecurringApproval({ approvalId: approval.id });
+      toast.success('Riproposta rifiutata.');
+    } catch (error) {
+      toast.error(error.message || 'Rifiuto non riuscito.');
+    } finally {
+      setBusy('');
+    }
+  };
+
   return (
     <div className="page">
       <PageHead
@@ -187,8 +234,12 @@ export function Organizer() {
                   <div>
                     <strong>{rule.data.title}</strong>
                     <small>
-                      Ogni {['domenica', 'lunedì', 'martedì', 'mercoledì', 'giovedì', 'venerdì', 'sabato'][rule.data.weekday]} alle{' '}
-                      {rule.data.time} · {rule.data.gym}
+                      {cadenceLabel(rule.data)} alle {rule.data.time} · {rule.data.gym}
+                    </small>
+                    <small>
+                      {rule.data.approvalMode === 'founder'
+                        ? 'Richiede l’approvazione del fondatore'
+                        : 'Pubblicazione automatica'}
                     </small>
                     {rule.data.lastPublishedDate ? (
                       <small>Ultima pubblicazione: {rule.data.lastPublishedDate}</small>
@@ -214,6 +265,63 @@ export function Organizer() {
                       disabled={busy === `del-${rule.id}`}
                     >
                       <Trash2 size={15} />
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+
+        <section className="card card-pad">
+          <div className="section-head">
+            <h2>
+              <CalendarClock size={18} /> Riproposte da approvare
+            </h2>
+            <Chip tone={approvals.length ? 'amber' : 'muted'}>{approvals.length}</Chip>
+          </div>
+          <p className="small muted">
+            Le ricorrenze impostate con approvazione del fondatore restano qui finché non le
+            approvi. All’approvazione viene creato il match con la visibilità originale del gruppo.
+          </p>
+          {approvals.length === 0 ? (
+            <EmptyState
+              icon={CalendarClock}
+              title="Nessuna richiesta in attesa"
+              text="Le prossime riproposte da approvare compariranno qui."
+            />
+          ) : (
+            <ul className="compact-list">
+              {approvals.map((approval) => (
+                <li key={approval.id}>
+                  <div>
+                    <strong>{approval.data.match?.title || 'Match ricorrente'}</strong>
+                    <small>
+                      {formatDateShort(approval.data.match?.startsAt)} ·{' '}
+                      {approval.data.match?.time} · {approval.data.match?.gym}
+                    </small>
+                    <small>
+                      {approval.data.visibility === 'group-private'
+                        ? `Solo gruppo${approval.data.groupName ? `: ${approval.data.groupName}` : ''}`
+                        : 'Pubblico'}
+                    </small>
+                  </div>
+                  <div className="row-actions">
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      onClick={() => approveApproval(approval)}
+                      disabled={busy === `approve-${approval.id}`}
+                    >
+                      <Check size={14} /> Approva
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      onClick={() => rejectApproval(approval)}
+                      disabled={busy === `reject-${approval.id}`}
+                    >
+                      <X size={14} /> Rifiuta
                     </button>
                   </div>
                 </li>
