@@ -478,6 +478,7 @@ export function GroupDetail() {
             currentUser={{ uid, nickname: profile?.nickname || nickname }}
             canWrite={canChat}
             isModerator={isOwner || isAdmin}
+            canClearChat={isAdmin}
             composerLabel={group.name}
             retentionDays={retentionDaysForSetting(groupSettings.disappearingMessages)}
             disabledReason={

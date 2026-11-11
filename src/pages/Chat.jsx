@@ -1,44 +1,21 @@
-import { ChevronDown, ChevronLeft, MessageCircle, Timer } from 'lucide-react';
+import { ChevronLeft } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../auth/AuthProvider';
 import { ChatRoom } from '../components/ChatRoom';
-import { useChatComposerDock } from '../components/ChatComposerDock';
-import { Chip } from '../components/ui';
 import { generalChatPath } from '../services/chat';
-import { LIMITS } from '../config';
 
 export function Chat() {
   const { uid, nickname, profile, isAdmin, isBanned, isSilenced } = useAuth();
-  const { requestGroupWheel } = useChatComposerDock();
 
   return (
     <div className="page chat-page chat-page--full">
       <section className="card chat-card chat-card--full">
-        <header className="chat-head chat-head--compact">
+        <header className="chat-head chat-head--compact chat-head--general">
           <Link to="/" className="chat-head-back" aria-label="Torna alla Home">
             <ChevronLeft size={22} />
           </Link>
-          <span className="chat-head-icon">
-            <MessageCircle size={20} />
-          </span>
           <div className="chat-head-title">
             <strong>#generale</strong>
-            <small>Tutta la community · solo testo ed emoji</small>
-          </div>
-          <button
-            type="button"
-            className="chat-head-switch"
-            onClick={requestGroupWheel}
-            aria-label="Scegli la chat"
-            title="Scegli la chat"
-          >
-            <ChevronDown size={16} />
-          </button>
-          <div className="chat-head-meta">
-            <Chip tone="blue" icon={Timer}>
-              {LIMITS.messageRetentionDays} giorni
-            </Chip>
-            {isAdmin ? <Chip tone="violet">Moderatore</Chip> : null}
           </div>
         </header>
         <ChatRoom
@@ -46,6 +23,7 @@ export function Chat() {
           currentUser={{ uid, nickname: profile?.nickname || nickname }}
           canWrite={!isBanned && !isSilenced}
           isModerator={isAdmin}
+          canClearChat={isAdmin}
           composerLabel="#generale"
           disabledReason={
             isBanned

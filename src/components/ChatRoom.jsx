@@ -10,6 +10,7 @@ import { useSubscription } from '../lib/hooks';
 import { formatDateShort, formatTime, toDate } from '../lib/format';
 import { LIMITS } from '../config';
 import {
+  clearChatMessages,
   deleteMessage,
   editMessage,
   loadOlderMessages,
@@ -53,6 +54,7 @@ export function ChatRoom({
   canWrite,
   disabledReason,
   isModerator = false,
+  canClearChat = false,
   composerLabel = 'questa chat',
   retentionDays = LIMITS.messageRetentionDays,
 }) {
@@ -72,6 +74,7 @@ export function ChatRoom({
   const [reportReason, setReportReason] = useState('');
   const [reportBusy, setReportBusy] = useState(false);
   const [activeMessageId, setActiveMessageId] = useState(null);
+  const [clearing, setClearing] = useState(false);
   const bodyRef = useRef(null);
   const inputRef = useRef(null);
   const stickRef = useRef(true);
@@ -236,6 +239,25 @@ export function ChatRoom({
     }
   };
 
+  const clearAll = async () => {
+    if (!canClearChat || clearing) return;
+    const ok = window.confirm(
+      'Svuotare questa chat? Tutti i messaggi verranno eliminati per tutti e non si potranno recuperare.'
+    );
+    if (!ok) return;
+    setClearing(true);
+    try {
+      const removed = await clearChatMessages({ path });
+      setOlder([]);
+      setHasMore(false);
+      toast.success(removed ? `${removed} messaggi eliminati.` : 'La chat era già vuota.');
+    } catch (error) {
+      toast.error(error.message || 'Impossibile svuotare la chat.');
+    } finally {
+      setClearing(false);
+    }
+  };
+
   const submitReport = async () => {
     if (!reportTarget) return;
     setReportBusy(true);
@@ -374,6 +396,18 @@ export function ChatRoom({
     <div className="chat">
       <div className="chat-body" ref={bodyRef} onScroll={onScroll}>
         <div className="chat-top">
+          {canClearChat && messages.length ? (
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm chat-clear"
+              onClick={clearAll}
+              disabled={clearing}
+              title="Svuota tutti i messaggi della chat"
+            >
+              {clearing ? <Loader2 size={14} className="spin" /> : <Trash2 size={14} />}
+              Svuota chat
+            </button>
+          ) : null}
           {hasMore ? (
             <button type="button" className="btn btn-ghost btn-sm" onClick={loadOlder} disabled={loadingOlder}>
               {loadingOlder ? <Loader2 size={14} className="spin" /> : null}
@@ -436,29 +470,40 @@ export function ChatRoom({
                 {!own ? <Avatar name={message.authorNickname} size="sm" /> : null}
                 <div className="msg-content">
                   {!own ? <span className="msg-author">{message.authorNickname}</span> : null}
-                  <div className={`msg-bubble ${message.deleted ? 'deleted' : ''} ${isProposal ? 'msg-bubble-proposal' : ''}`}>
-                    {message.replyTo ? (
-                      <div className="msg-quote">
-                        <strong>{message.replyTo.nickname}</strong>
-                        <span>{message.replyTo.text || 'Messaggio eliminato'}</span>
-                      </div>
-                    ) : null}
-                    {message.deleted ? (
+                  {message.deleted ? (
+                    <div className="msg-bubble deleted">
                       <p className="msg-deleted">Questo messaggio è stato eliminato</p>
-                    ) : isProposal ? (
-                      message.type === 'match' ? (
+                      <div className="msg-meta">
+                        <time>{formatTime(message.createdAt)}</time>
+                      </div>
+                    </div>
+                  ) : isProposal ? (
+                    <div className="msg-proposal-body">
+                      {message.type === 'match' ? (
                         <MatchProposalCard message={message} />
                       ) : (
                         <PlayerRequestCard message={message} currentUser={currentUser} />
-                      )
-                    ) : (
-                      <p className="msg-text">{message.text}</p>
-                    )}
-                    <div className="msg-meta">
-                      {message.editedAt && !message.deleted ? <span className="edited">Modificato</span> : null}
-                      <time>{formatTime(message.createdAt)}</time>
+                      )}
+                      <div className="msg-meta msg-meta--proposal">
+                        {message.editedAt ? <span className="edited">Modificato</span> : null}
+                        <time>{formatTime(message.createdAt)}</time>
+                      </div>
                     </div>
-                  </div>
+                  ) : (
+                    <div className="msg-bubble">
+                      {message.replyTo ? (
+                        <div className="msg-quote">
+                          <strong>{message.replyTo.nickname}</strong>
+                          <span>{message.replyTo.text || 'Messaggio eliminato'}</span>
+                        </div>
+                      ) : null}
+                      <p className="msg-text">{message.text}</p>
+                      <div className="msg-meta">
+                        {message.editedAt ? <span className="edited">Modificato</span> : null}
+                        <time>{formatTime(message.createdAt)}</time>
+                      </div>
+                    </div>
+                  )}
                   <div
                     className="msg-actions"
                     onClick={(event) => event.stopPropagation()}

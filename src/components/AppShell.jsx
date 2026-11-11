@@ -10,7 +10,6 @@ import {
   ShieldAlert,
   Sparkles,
   Users,
-  Volleyball,
 } from 'lucide-react';
 import { useAuth } from '../auth/AuthProvider';
 import { Avatar, Chip } from './ui';
@@ -116,7 +115,7 @@ export function AppShell() {
         <header className="topbar">
           <NavLink to="/" className="brand-mobile">
             <span className="brand-mark">
-              <Volleyball size={18} strokeWidth={2} />
+              <Logo size={26} />
             </span>
             <strong>Volley Bologna</strong>
           </NavLink>

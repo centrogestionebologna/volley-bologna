@@ -92,7 +92,7 @@ npm run preview
 
 ```
 public/
-  logo.svg               logo della community (favicon e interfaccia)
+  logo.png               logo della community (favicon e interfaccia)
 src/
   config.js              env Firebase, controllo config, limiti prodotto (retention 30gg, offerte 30min)
   backend.js             unico backend: Cloud Firestore (null se manca la config)
@@ -260,14 +260,11 @@ npm run worker:deploy  # deploy del worker
 
 ## 9. Logo
 
-Il logo della community è in [public/logo.svg](public/logo.svg) e viene usato in sidebar, login,
+Il logo della community è in [public/logo.png](public/logo.png) e viene usato in sidebar, login,
 splash, hero della home e come favicon.
 
-Per usare un'immagine diversa (per esempio il PNG originale):
-
-1. salva il file in `public/logo.png`;
-2. imposta in `.env.local` (e nelle env di build su Cloudflare) `VITE_LOGO_URL=/logo.png`;
-3. riavvia il dev server o rifai il build.
+Per sostituirlo, salva il nuovo file in `public/logo.png` (oppure imposta `VITE_LOGO_URL` in
+`.env.local` e nelle env di build su Cloudflare) e rifai il build.
 
 ---
 

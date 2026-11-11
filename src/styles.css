@@ -2222,8 +2222,15 @@ textarea {
 
 .chat-top {
   display: flex;
+  align-items: center;
   justify-content: center;
+  gap: 8px;
+  flex-wrap: wrap;
   padding-bottom: 8px;
+}
+
+.chat-clear {
+  color: #b42318;
 }
 
 .chat-start {
@@ -4644,12 +4651,16 @@ html.chat-mode-active body {
   max-width: min(92%, 390px);
 }
 
-.msg-bubble-proposal,
-.msg.own .msg-bubble-proposal {
+.msg-proposal-body {
   min-width: 0;
-  padding: 0;
-  background: transparent;
-  box-shadow: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+}
+
+.msg-proposal-body .msg-meta {
+  padding: 0 5px;
 }
 
 .chat-proposal {
@@ -5047,8 +5058,15 @@ html.chat-mode-active body {
   opacity: 0.9;
 }
 
-.home-dark-hero-art svg {
+.home-dark-hero-art svg,
+.home-dark-hero-art .home-dark-hero-logo {
   filter: drop-shadow(0 14px 26px rgba(200, 241, 105, 0.12));
+}
+
+.home-dark-hero-art .home-dark-hero-logo {
+  width: 128px;
+  height: 128px;
+  object-fit: contain;
 }
 
 .home-dark-hero-art span {

@@ -144,3 +144,20 @@ export async function deleteMessage({ path, messageId, deletedBy }) {
     deletedBy,
   });
 }
+
+const CLEAR_PAGE_SIZE = 200;
+const CLEAR_MAX_PAGES = 100;
+
+/** Elimina definitivamente tutti i messaggi di una chat (riservato agli admin). */
+export async function clearChatMessages({ path }) {
+  if (!path) throw new Error('Chat non valida.');
+  let deleted = 0;
+  for (let page = 0; page < CLEAR_MAX_PAGES; page += 1) {
+    const rows = await store.listDocs(path, { limit: CLEAR_PAGE_SIZE });
+    if (!rows.length) break;
+    await Promise.all(rows.map((row) => store.deleteDoc(`${path}/${row.id}`)));
+    deleted += rows.length;
+    if (rows.length < CLEAR_PAGE_SIZE) break;
+  }
+  return deleted;
+}

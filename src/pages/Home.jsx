@@ -8,11 +8,11 @@ import {
   Search,
   UserRound,
   Users,
-  Volleyball,
 } from 'lucide-react';
 import { useAuth } from '../auth/AuthProvider';
 import { store } from '../backend';
 import { useAsync } from '../lib/hooks';
+import { Logo } from '../components/Logo';
 import { Spinner } from '../components/ui';
 import { formatDateShort, toDate } from '../lib/format';
 import { listMyRegistrations } from '../services/matches';
@@ -81,7 +81,7 @@ export function Home() {
           </div>
         </div>
         <div className="home-dark-hero-art" aria-hidden="true">
-          <Volleyball size={128} strokeWidth={1.1} />
+          <Logo size={128} className="home-dark-hero-logo" />
           <span>Gioca. Connettiti. Torna in campo.</span>
         </div>
       </section>
