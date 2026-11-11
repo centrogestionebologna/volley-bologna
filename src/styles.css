@@ -141,6 +141,12 @@ textarea {
   min-height: 100vh;
 }
 
+.app.home-mode,
+.app.home-mode .main,
+.app.home-mode .content {
+  background: #05070a;
+}
+
 .sidebar {
   width: 252px;
   flex: 0 0 252px;

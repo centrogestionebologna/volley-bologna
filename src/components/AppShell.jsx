@@ -30,6 +30,7 @@ export function AppShell() {
   const { nickname, profile, isAdmin, isBanned, offers, signOut, user } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+  const isHome = location.pathname === '/';
   const nextOffer = offers?.[0];
   const chatQuery = new URLSearchParams(location.search);
   const isChatMode =
@@ -72,7 +73,7 @@ export function AppShell() {
   }, [isChatMode]);
 
   return (
-    <div className={`app ${isChatMode ? 'chat-mode' : ''}`}>
+    <div className={`app ${isChatMode ? 'chat-mode' : ''} ${isHome ? 'home-mode' : ''}`}>
       <aside className="sidebar">
         <NavLink to="/" className="brand">
           <span className="brand-mark">

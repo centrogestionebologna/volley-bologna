@@ -3,11 +3,11 @@ const env = import.meta.env;
 export const APP_NAME = 'Volley Bologna Community';
 export const ADMIN_NAME = 'Adriano';
 
-/** Logo della community: il PNG ufficiale ha la precedenza sui vecchi default. */
+/** Logo della community: usa il file ufficiale per evitare cache o asset vecchi. */
 const configuredLogo = env.VITE_LOGO_URL;
 export const LOGO_URL =
-  !configuredLogo || configuredLogo === '/logo.svg' || configuredLogo === '/logo.png'
-    ? '/logo.png?v=3'
+  !configuredLogo || /^\/logo\.(svg|png)(\?.*)?$/.test(configuredLogo)
+    ? '/community-logo.png?v=3'
     : configuredLogo;
 
 export const firebaseConfig = {
