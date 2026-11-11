@@ -3,8 +3,12 @@ const env = import.meta.env;
 export const APP_NAME = 'Volley Bologna Community';
 export const ADMIN_NAME = 'Adriano';
 
-/** Logo della community: sostituibile con un'immagine diversa via VITE_LOGO_URL. */
-export const LOGO_URL = env.VITE_LOGO_URL || '/logo.png';
+/** Logo della community: il PNG ufficiale ha la precedenza sui vecchi default. */
+const configuredLogo = env.VITE_LOGO_URL;
+export const LOGO_URL =
+  !configuredLogo || configuredLogo === '/logo.svg' || configuredLogo === '/logo.png'
+    ? '/logo.png?v=3'
+    : configuredLogo;
 
 export const firebaseConfig = {
   apiKey: env.VITE_FIREBASE_API_KEY || '',

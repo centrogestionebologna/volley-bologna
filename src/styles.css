@@ -4311,6 +4311,15 @@ html.chat-mode-active body {
   color: var(--blue);
 }
 
+.chat-head-general-name {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
 .chat-head--compact .chat-head-title small {
   font-size: 0.72rem;
 }
@@ -4651,6 +4660,13 @@ html.chat-mode-active body {
   max-width: min(92%, 390px);
 }
 
+.msg-proposal,
+.msg-proposal .msg-content,
+.msg-proposal-body {
+  background: transparent;
+  box-shadow: none;
+}
+
 .msg-proposal-body {
   min-width: 0;
   display: flex;
@@ -4661,6 +4677,61 @@ html.chat-mode-active body {
 
 .msg-proposal-body .msg-meta {
   padding: 0 5px;
+}
+
+.chat-info {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.chat-info-list {
+  display: grid;
+  gap: 7px;
+}
+
+.chat-info-list > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.chat-info-list span {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.chat-info-list strong {
+  font-size: 0.82rem;
+  text-align: right;
+}
+
+.chat-info-admin {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid #eadbc1;
+  border-radius: 12px;
+  background: #fffbf3;
+}
+
+.chat-info-admin h3 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.chat-info-admin-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .chat-proposal {
