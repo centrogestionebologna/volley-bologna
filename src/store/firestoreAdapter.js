@@ -123,8 +123,16 @@ export function createFirestoreBackend(config) {
             return snap.exists() ? { id: snap.id, data: snap.data() } : null;
           },
           async query(path, options = {}) {
-            const snap = await trx.get(buildQuery(db, path, options));
-            return snap.docs.map((item) => ({ id: item.id, data: item.data() }));
+            // Firestore Transaction.get accetta solo DocumentReference, non Query.
+            // Eseguiamo la query fuori dalla transazione e rileggiamo ogni documento
+            // dentro la transazione, così i dati restano coerenti.
+            const snap = await getDocs(buildQuery(db, path, options));
+            const rows = [];
+            for (const item of snap.docs) {
+              const fresh = await trx.get(item.ref);
+              if (fresh.exists()) rows.push({ id: fresh.id, data: fresh.data() });
+            }
+            return rows;
           },
           set(path, data, options = {}) {
             trx.set(doc(db, path), encode(data), options.merge ? { merge: true } : undefined);

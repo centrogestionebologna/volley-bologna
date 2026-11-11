@@ -1452,7 +1452,11 @@ textarea {
   font-size: 0.9rem;
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 6px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .participant-info small {
@@ -1461,6 +1465,7 @@ textarea {
 }
 
 .you-tag {
+  flex: 0 0 auto;
   font-size: 0.62rem;
   background: var(--blue);
   color: #fff;
@@ -4099,12 +4104,28 @@ textarea {
     gap: 8px;
   }
 
+  .content {
+    padding-bottom: calc(96px + env(safe-area-inset-bottom));
+  }
+
   .participant {
     flex-wrap: wrap;
+    align-items: flex-start;
+  }
+
+  .participant-info {
+    flex: 1 1 120px;
   }
 
   .participant-actions {
     margin-left: auto;
+    align-self: center;
+    gap: 0;
+  }
+
+  .participant-actions .icon-btn {
+    width: 28px;
+    height: 28px;
   }
 
   .admin-tabs {

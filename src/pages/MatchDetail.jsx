@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -13,6 +13,7 @@ import {
   MapPin,
   Megaphone,
   Pencil,
+  RotateCcw,
   ShieldAlert,
   Star,
   Trash2,
@@ -28,6 +29,7 @@ import {
   cancelSignup,
   confirmSeat,
   declineSeat,
+  ensureOrganizerRegistration,
   publishMatchToChat,
   removeParticipant,
   setMatchStatus,
@@ -52,14 +54,22 @@ export function MatchDetail() {
   const match = matchState.data ? { id: matchState.data.id, ...matchState.data.data } : null;
   const registrations = (regsState.data || []).map((row) => ({ id: row.id, ...row.data }));
   const isOrganizer = Boolean(match && match.organizerId === uid);
+  const groupState = useSubscription(
+    (cb) => (match?.groupId ? store.subscribeDoc(`groups/${match.groupId}`, cb) : () => {}),
+    [match?.groupId]
+  );
+  const isGroupFounder = Boolean(
+    uid && match?.groupId && groupState.data?.data?.ownerId === uid
+  );
+  const canManageParticipants = isOrganizer || isAdmin || isGroupFounder;
 
   const trustedState = useSubscription(
-    (cb) => (isOrganizer ? subscribeTrusted(uid, cb) : () => {}),
-    [isOrganizer, uid]
+    (cb) => (canManageParticipants ? subscribeTrusted(uid, cb) : () => {}),
+    [canManageParticipants, uid]
   );
   const ratingsState = useSubscription(
-    (cb) => (isOrganizer ? subscribeRatings(uid, cb) : () => {}),
-    [isOrganizer, uid]
+    (cb) => (canManageParticipants ? subscribeRatings(uid, cb) : () => {}),
+    [canManageParticipants, uid]
   );
   const trusted = new Map((trustedState.data || []).map((row) => [row.id, row.data]));
   const myRatings = new Map((ratingsState.data || []).map((row) => [row.id, row.data]));
@@ -71,6 +81,39 @@ export function MatchDetail() {
   const [ratingTarget, setRatingTarget] = useState(null);
   const [ratingScore, setRatingScore] = useState(5);
   const [ratingNote, setRatingNote] = useState('');
+  const autoJoinBusy = useRef(false);
+
+  useEffect(() => {
+    if (
+      !isOrganizer ||
+      !match ||
+      match.status !== 'open' ||
+      match.organizerOptOut ||
+      autoJoinBusy.current
+    ) {
+      return;
+    }
+    autoJoinBusy.current = true;
+    ensureOrganizerRegistration({
+      matchId,
+      match,
+      organizer: { uid, nickname: profile?.nickname || nickname },
+    })
+      .catch(() => {})
+      .finally(() => {
+        autoJoinBusy.current = false;
+      });
+  }, [
+    isOrganizer,
+    matchId,
+    match?.status,
+    match?.organizerOptOut,
+    match?.confirmedCount,
+    match?.maxPlayers,
+    uid,
+    nickname,
+    profile?.nickname,
+  ]);
 
   const myReg = registrations.find((reg) => reg.uid === uid);
   const confirmed = registrations
@@ -235,6 +278,11 @@ export function MatchDetail() {
     run('close', () => setMatchStatus(matchId, 'closed'), 'Iscrizioni chiuse.');
   };
 
+  const reopenSignups = () => {
+    if (!window.confirm('Riaprire le iscrizioni a questo match?')) return;
+    run('reopen', () => setMatchStatus(matchId, 'open'), 'Iscrizioni riaperte.');
+  };
+
   const publishToGeneralChat = async () => {
     setBusy('publish');
     try {
@@ -289,7 +337,7 @@ export function MatchDetail() {
           </small>
         </div>
         {isTrusted ? <Chip tone="green" icon={BadgeCheck}>Affidabile</Chip> : null}
-        {isOrganizer || isAdmin ? (
+        {canManageParticipants ? (
           <div className="participant-actions">
             <button
               type="button"
@@ -370,6 +418,10 @@ export function MatchDetail() {
               {match.status === 'open' ? (
                 <button type="button" className="btn btn-ghost btn-sm" onClick={closeSignups}>
                   Chiudi iscrizioni
+                </button>
+              ) : match.status === 'closed' && !started ? (
+                <button type="button" className="btn btn-ghost btn-sm" onClick={reopenSignups}>
+                  <RotateCcw size={15} /> Riapri iscrizioni
                 </button>
               ) : null}
             </div>
@@ -562,15 +614,18 @@ export function MatchDetail() {
                 <Gavel size={15} /> Segnala irregolarità dai partecipanti
               </li>
             </ul>
-            {isOrganizer ? (
+            {canManageParticipants ? (
               <div className="organizer-tools">
                 <p className="small">
-                  In qualità di organizzatore puoi rimuovere un iscritto, segnare un utente come
-                  affidabile e aprire una segnalazione per irregolarità.
+                  {isOrganizer
+                    ? 'In qualità di organizzatore puoi rimuovere un iscritto, segnare un utente come affidabile e aprire una segnalazione per irregolarità.'
+                    : 'In qualità di fondatore del gruppo puoi gestire la lista dei partecipanti, rimuovere iscritti e aprire segnalazioni.'}
                 </p>
-                <Link to="/organizzatore" className="btn btn-ghost btn-sm btn-block">
-                  La tua area organizer
-                </Link>
+                {isOrganizer ? (
+                  <Link to="/organizzatore" className="btn btn-ghost btn-sm btn-block">
+                    La tua area organizer
+                  </Link>
+                ) : null}
               </div>
             ) : null}
           </section>

@@ -212,9 +212,10 @@ async function publishRecurring(env, db, now) {
         groupName: data.groupName || '',
         groupVisibility: data.groupVisibility || null,
         visibility: data.visibility || 'public',
-        confirmedCount: 0,
+        confirmedCount: 1,
         waitlistCount: 0,
-        registrationSeq: 0,
+        registrationSeq: 1,
+        organizerOptOut: false,
         pendingOffer: null,
         pendingOfferUid: null,
         status: 'open',
@@ -257,6 +258,23 @@ async function publishRecurring(env, db, now) {
       try {
         await db.create(`matches/${docId}`, matchData);
         created += 1;
+        if (data.organizerId) {
+          try {
+            await db.create(`matches/${docId}/registrations/${data.organizerId}`, {
+              uid: data.organizerId,
+              nickname: data.organizerNickname || '',
+              status: 'confirmed',
+              seq: 1,
+              createdAt: new Date(now),
+              confirmedAt: new Date(now),
+              offerExpiresAt: null,
+            });
+          } catch (regError) {
+            if (regError.status !== 409) {
+              console.warn(`Organizzatore non aggiunto a ${docId}`, regError.message);
+            }
+          }
+        }
       } catch (error) {
         if (error.status !== 409 && error.status !== 400) {
           console.warn(`Ricorrenza ${docId} non pubblicata`, error.message);

@@ -55,6 +55,7 @@ service cloud.firestore {
       return signedIn() && matchExists(id) && matchData(id).organizerId == uid();
     }
 
+
     function isMatchParticipant(id) {
       return signedIn()
         && exists(/databases/$(database)/documents/matches/$(id)/registrations/$(uid()));
@@ -70,6 +71,15 @@ service cloud.firestore {
 
     function isGroupOwner(id) {
       return signedIn() && groupExists(id) && groupData(id).ownerId == uid();
+    }
+
+    function isMatchGroupOwner(id) {
+      return signedIn()
+        && matchExists(id)
+        && matchData(id).keys().hasAll(['groupId'])
+        && matchData(id).groupId is string
+        && groupExists(matchData(id).groupId)
+        && groupData(matchData(id).groupId).ownerId == uid();
     }
 
     function memberExists(id) {
@@ -192,6 +202,7 @@ service cloud.firestore {
         );
       allow update: if isAdmin()
         || isMatchOrganizer(matchId)
+        || isMatchGroupOwner(matchId)
         || (
           isMatchParticipant(matchId)
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
@@ -212,6 +223,7 @@ service cloud.firestore {
         && request.resource.data.seq is int;
       allow update: if isAdmin()
         || isMatchOrganizer(matchId)
+        || isMatchGroupOwner(matchId)
         || (
           regId == uid()
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'confirmedAt', 'offerExpiresAt'])
@@ -222,7 +234,10 @@ service cloud.firestore {
           && request.resource.data.status == 'offered'
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'offerExpiresAt'])
         );
-      allow delete: if isAdmin() || isMatchOrganizer(matchId) || regId == uid();
+      allow delete: if isAdmin()
+        || isMatchOrganizer(matchId)
+        || isMatchGroupOwner(matchId)
+        || regId == uid();
     }
 
     match /recurringMatches/{ruleId} {

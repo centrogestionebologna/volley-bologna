@@ -1,7 +1,7 @@
 import { serverTimestamp } from '../store/base';
 import { toDate, dateKey, pad } from '../lib/format';
 import { LIMITS, retentionDaysForSetting } from '../config';
-import { expirePendingOffer } from './matches';
+import { expirePendingOffer, regPath } from './matches';
 
 const DAYS_AHEAD = 31;
 
@@ -118,9 +118,10 @@ export async function publishRecurringMatches(storeApi) {
         groupName: rule.groupName || '',
         groupVisibility: rule.groupVisibility || null,
         visibility: rule.visibility || 'public',
-        confirmedCount: 0,
+        confirmedCount: 1,
         waitlistCount: 0,
-        registrationSeq: 0,
+        registrationSeq: 1,
+        organizerOptOut: false,
         pendingOffer: null,
         pendingOfferUid: null,
         status: 'open',
@@ -162,6 +163,21 @@ export async function publishRecurringMatches(storeApi) {
       try {
         await storeApi.setDoc(`matches/${docId}`, matchData);
         created += 1;
+        if (rule.organizerId) {
+          try {
+            await storeApi.setDoc(regPath(docId, rule.organizerId), {
+              uid: rule.organizerId,
+              nickname: rule.organizerNickname || '',
+              status: 'confirmed',
+              seq: 1,
+              createdAt: serverTimestamp(),
+              confirmedAt: serverTimestamp(),
+              offerExpiresAt: null,
+            });
+          } catch (error) {
+            console.warn('Organizzatore non aggiunto alla ricorrenza', error?.message);
+          }
+        }
       } catch (error) {
         // Se il cron e un altro processo creano lo stesso match, il secondo fallisce: ignorabile.
         console.warn('Pubblicazione ricorrenza saltata', docId, error?.message);

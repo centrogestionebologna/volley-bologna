@@ -48,7 +48,11 @@ export async function pickNextWaitlist(tx, matchId) {
   const rows = await tx.query(`matches/${matchId}/registrations`, {
     where: [['status', '==', 'waitlist']],
   });
-  return rows.sort((a, b) => (a.data.seq || 0) - (b.data.seq || 0))[0] || null;
+  return (
+    rows
+      .filter((row) => row.data.status === 'waitlist')
+      .sort((a, b) => (a.data.seq || 0) - (b.data.seq || 0))[0] || null
+  );
 }
 
 /** Iscrizione atomica: contatori e timestamp calcolati dal server. */
@@ -83,6 +87,7 @@ export async function signUpForMatch({ matchId, user, nickname }) {
       registrationSeq: seq,
       confirmedCount: (match.confirmedCount || 0) + (status === 'confirmed' ? 1 : 0),
       waitlistCount: (match.waitlistCount || 0) + (status === 'waitlist' ? 1 : 0),
+      ...(match.organizerId === user.uid ? { organizerOptOut: false } : {}),
       updatedAt: serverTimestamp(),
     });
 
@@ -98,6 +103,7 @@ async function leaveMatch(matchId, uid, { skipDeadline = false } = {}) {
     if (!regDoc) throw new Error('Iscrizione non trovata.');
     const match = matchDoc.data;
     const status = regDoc.data.status;
+    const organizerLeaving = match.organizerId === uid;
 
     if (!skipDeadline) {
       const deadline = toDate(match.deadlineAt);
@@ -120,6 +126,7 @@ async function leaveMatch(matchId, uid, { skipDeadline = false } = {}) {
     const patch = {
       confirmedCount,
       waitlistCount,
+      ...(organizerLeaving ? { organizerOptOut: true } : {}),
       updatedAt: serverTimestamp(),
     };
 
@@ -323,11 +330,36 @@ export async function createMatch(
     pendingOffer: null,
     pendingOfferUid: null,
     status: 'open',
+    organizerOptOut: false,
     recurringId: null,
     chatMessageId: null,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
+
+  // L'organizzatore è il primo iscritto: può comunque rimuoversi in seguito.
+  let confirmedCount = 0;
+  try {
+    await store.runTransaction(async (tx) => {
+      tx.set(regPath(matchId, organizer.uid), {
+        uid: organizer.uid,
+        nickname: organizer.nickname,
+        status: 'confirmed',
+        seq: 1,
+        createdAt: serverTimestamp(),
+        confirmedAt: serverTimestamp(),
+        offerExpiresAt: null,
+      });
+      tx.update(`matches/${matchId}`, {
+        confirmedCount: 1,
+        registrationSeq: 1,
+        updatedAt: serverTimestamp(),
+      });
+    });
+    confirmedCount = 1;
+  } catch (error) {
+    console.warn('Organizzatore non aggiunto automaticamente', error?.message);
+  }
 
   if (group?.id) {
     try {
@@ -338,7 +370,7 @@ export async function createMatch(
         match: {
           ...data,
           organizerNickname: organizer.nickname,
-          confirmedCount: 0,
+          confirmedCount,
           waitlistCount: 0,
           status: 'open',
         },
@@ -357,7 +389,7 @@ export async function createMatch(
         match: {
           ...data,
           organizerNickname: organizer.nickname,
-          confirmedCount: 0,
+          confirmedCount,
           waitlistCount: 0,
           status: 'open',
         },
@@ -405,6 +437,46 @@ export async function createMatch(
   }
 
   return matchId;
+}
+
+export async function ensureOrganizerRegistration({ matchId, match, organizer }) {
+  if (!matchId || !match || !organizer?.uid) return false;
+  if (match.organizerId !== organizer.uid || match.organizerOptOut) return false;
+  if (match.status !== 'open') return false;
+  const start = toDate(match.startsAt);
+  if (start && start.getTime() < Date.now()) return false;
+
+  return store.runTransaction(async (tx) => {
+    const freshMatch = await tx.get(`matches/${matchId}`);
+    if (!freshMatch) return false;
+    const data = freshMatch.data;
+    if (data.organizerId !== organizer.uid || data.organizerOptOut || data.status !== 'open') {
+      return false;
+    }
+    const startDate = toDate(data.startsAt);
+    if (startDate && startDate.getTime() < Date.now()) return false;
+    if ((data.confirmedCount || 0) >= (data.maxPlayers || 0)) return false;
+
+    const existing = await tx.get(regPath(matchId, organizer.uid));
+    if (existing) return false;
+
+    const seq = (data.registrationSeq || 0) + 1;
+    tx.set(regPath(matchId, organizer.uid), {
+      uid: organizer.uid,
+      nickname: organizer.nickname,
+      status: 'confirmed',
+      seq,
+      createdAt: serverTimestamp(),
+      confirmedAt: serverTimestamp(),
+      offerExpiresAt: null,
+    });
+    tx.update(`matches/${matchId}`, {
+      registrationSeq: seq,
+      confirmedCount: (data.confirmedCount || 0) + 1,
+      updatedAt: serverTimestamp(),
+    });
+    return true;
+  });
 }
 
 export async function publishMatchToChat({ matchId, match, organizer }) {
