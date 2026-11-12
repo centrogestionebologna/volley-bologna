@@ -75,13 +75,19 @@ export function GroupDetail() {
   const isBannedHere = Boolean(group && (group.bannedUids || []).includes(uid));
   const isMember = membership?.status === 'active';
   const isPending = membership?.status === 'pending';
+  // Ospite temporaneo: aggiunto alla chat dopo l'approvazione di una ricerca
+  // giocatori. Vede solo la chat, mai descrizione e codici invito.
+  const isGuest = Boolean(isMember && membership?.role === 'guest');
+  const guestUntil = toDate(membership?.guestUntil);
+  const baseNickname = profile?.nickname || nickname;
+  const chatNickname = isGuest ? `${baseNickname} (guest)` : baseNickname;
   const groupSettings = normalizeGroupSettings(group);
   const canManageSettings = Boolean(group && (isOwner || isAdmin));
   const canEditGroup = Boolean(
-    group && (canManageSettings || (isMember && groupSettings.editInfoPolicy === 'all'))
+    group && (canManageSettings || (isMember && !isGuest && groupSettings.editInfoPolicy === 'all'))
   );
   const canReadInvite = Boolean(
-    group && (canManageSettings || (isMember && groupSettings.addMembersPolicy === 'all'))
+    group && (canManageSettings || (isMember && !isGuest && groupSettings.addMembersPolicy === 'all'))
   );
   const infoOpen = searchParams.get('tab') === 'membri';
   const focusRequested =
@@ -441,7 +447,15 @@ export function GroupDetail() {
   const badgeForMembership = isBannedHere
     ? { tone: 'red', label: 'Accesso negato' }
     : isMember
-      ? { tone: 'green', label: membership?.role === 'owner' ? 'Fondatore' : 'Membro' }
+      ? {
+          tone: 'green',
+          label:
+            membership?.role === 'owner'
+              ? 'Fondatore'
+              : membership?.role === 'guest'
+                ? 'Ospite'
+                : 'Membro',
+        }
       : isPending
         ? { tone: 'amber', label: 'In attesa' }
         : { tone: 'muted', label: 'Non iscritto' };
@@ -468,12 +482,13 @@ export function GroupDetail() {
               <Link
                 to={`/gruppi/${groupId}?tab=membri`}
                 className="chat-head-name"
-                title="Apri la descrizione del gruppo"
+                title={isGuest ? 'Membri del gruppo' : 'Apri la descrizione del gruppo'}
               >
                 {group.name}
               </Link>
+              {isGuest ? <Chip tone="amber">Ospite</Chip> : null}
             </div>
-            {isMember && !isBannedHere && !isBanned && !isSilenced ? (
+            {isMember && !isGuest && !isBannedHere && !isBanned && !isSilenced ? (
               <Link
                 to={`/match/nuovo?groupId=${groupId}`}
                 className="chat-head-action"
@@ -485,7 +500,7 @@ export function GroupDetail() {
           </header>
           <ChatRoom
             path={groupChatPath(groupId)}
-            currentUser={{ uid, nickname: profile?.nickname || nickname }}
+            currentUser={{ uid, nickname: chatNickname }}
             canWrite={canChat}
             isModerator={isOwner || isAdmin}
             canClearChat={isAdmin}
@@ -529,7 +544,11 @@ export function GroupDetail() {
               </Chip>
               <Chip tone={badgeForMembership.tone}>{badgeForMembership.label}</Chip>
             </div>
-            <p>{group.description || 'Nessuna descrizione.'}</p>
+            <p>
+              {isGuest
+                ? 'Descrizione riservata: come ospite vedi solo la chat del gruppo.'
+                : group.description || 'Nessuna descrizione.'}
+            </p>
             <div className="group-meta">
               <span>
                 <Users size={14} /> {group.memberCount || 1} membri
@@ -563,7 +582,21 @@ export function GroupDetail() {
         </div>
       </header>
 
-      {!isBannedHere ? (
+      {isGuest ? (
+        <div className="banner banner-warn">
+          <ShieldAlert size={18} />
+          <div>
+            <strong>Accesso ospite</strong>
+            <span>
+              Sei nella chat di questo gruppo come ospite
+              {guestUntil ? ` fino al ${formatDateShort(guestUntil)}` : ''}: descrizione e codici
+              invito restano riservati ai membri.
+            </span>
+          </div>
+        </div>
+      ) : null}
+
+      {!isBannedHere && !isGuest ? (
         <section className="card card-pad group-settings">
           <div className="section-head">
             <h2>
@@ -683,7 +716,12 @@ export function GroupDetail() {
                       {member.nickname} {member.id === uid ? <span className="you-tag">tu</span> : null}
                     </strong>
                     <small>
-                      {member.role === 'owner' ? 'Fondatore' : 'Membro'} · dal {formatDateShort(member.joinedAt)}
+                      {member.role === 'owner'
+                        ? 'Fondatore'
+                        : member.role === 'guest'
+                          ? 'Ospite temporaneo'
+                          : 'Membro'}{' '}
+                      · dal {formatDateShort(member.joinedAt)}
                     </small>
                   </div>
                   {isOwner && member.id !== uid ? (
@@ -801,7 +839,11 @@ export function GroupDetail() {
               <h2 className="card-title">
                 <Link2 size={17} /> Invito
               </h2>
-              {group.visibility === 'private' ? (
+              {isGuest ? (
+                <p className="small muted">
+                  Come ospite temporaneo non puoi vedere il codice invito del gruppo.
+                </p>
+              ) : group.visibility === 'private' ? (
                 canReadInvite ? (
                   <>
                     <p className="small muted">

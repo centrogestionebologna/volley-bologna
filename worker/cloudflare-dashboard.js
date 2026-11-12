@@ -19,6 +19,8 @@
 
 // ===== worker/src/firestore.js =====
 
+
+
 /**
  * Client Firestore REST minimale per Cloudflare Workers.
  * Usa un service account (JWT RS256 firmato con Web Crypto) e le API REST v1.
@@ -263,8 +265,6 @@ function createFirestore(env) {
   };
 }
 
-// ===== worker/src/webpush.js =====
-
 /**
  * Web Push con Web Crypto: cifratura aes128gcm (RFC 8291/8188) e VAPID (RFC 8292).
  *
@@ -469,8 +469,6 @@ async function sendWebPush(env, subscription, message) {
   return response.status;
 }
 
-// ===== worker/src/index.js =====
-
 const DAY_MS = 86400000;
 const OFFER_MS = 30 * 60000;
 const RETENTION_DAYS = 30;
@@ -632,6 +630,41 @@ async function purgeMessages(env, db, now) {
     }
   }
   return deleted;
+}
+
+/**
+ * Ospiti temporanei: chi è stato approvato su una ricerca giocatori entra
+ * nella chat del gruppo con guestUntil. A match finito la membership scade e
+ * va rimossa, altrimenti l'accesso alla chat resterebbe aperto per sempre.
+ */
+async function expireGuests(env, db, now) {
+  const groups = await db.query('groups', { limit: 100 });
+  let removed = 0;
+
+  for (const group of groups) {
+    const guests = await db.query(`groups/${group.id}/members`, {
+      where: ['role', '==', 'guest'],
+      limit: 200,
+    });
+    const expired = guests.filter((row) => {
+      const until = row.data.guestUntil;
+      return until && new Date(until).getTime() < now;
+    });
+    if (!expired.length) continue;
+
+    try {
+      await db.commit(expired.map((row) => ({ delete: documentName(env, row.path) })));
+      await db.update(`groups/${group.id}`, {
+        memberCount: Math.max(1, (group.data.memberCount || 1) - expired.length),
+        updatedAt: new Date(now),
+      });
+      removed += expired.length;
+    } catch (error) {
+      console.warn(`Ospiti scaduti non rimossi da ${group.id}`, error.message);
+    }
+  }
+
+  return removed;
 }
 
 // ── Notifiche push ─────────────────────────────────────────────────────────
@@ -946,6 +979,7 @@ async function runAll(env, { force = false } = {}) {
   const summary = {
     offers: 0,
     messages: 0,
+    guests: 0,
     matches: 0,
     push: null,
     skipped: [],
@@ -963,6 +997,12 @@ async function runAll(env, { force = false } = {}) {
     summary.messages = await purgeMessages(env, db, now);
   } else {
     summary.skipped.push('pulizia messaggi');
+  }
+
+  if (force || (rome.hour === 4 && rome.minute === 0)) {
+    summary.guests = await expireGuests(env, db, now);
+  } else {
+    summary.skipped.push('ospiti scaduti');
   }
 
   if (force || (rome.hour === 5 && rome.minute === 0)) {

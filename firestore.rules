@@ -246,7 +246,48 @@ service cloud.firestore {
       allow delete: if isAdmin()
         || isMatchOrganizer(matchId)
         || isMatchGroupOwner(matchId)
-        || regId == uid();
+        || (
+          // Dopo la deadline chi ha un posto non si cancella da solo: chiede la
+          // sostituzione. Chi è solo in riserva può uscire quando vuole.
+          regId == uid()
+          && (
+            resource.data.status != 'confirmed'
+            || !matchData(matchId).keys().hasAll(['deadlineAt'])
+            || matchData(matchId).deadlineAt == null
+            || matchData(matchId).deadlineAt > request.time
+          )
+        );
+    }
+
+    // Richieste di sostituzione: chi non può più venire dopo la deadline le
+    // scrive qui; l'organizzatore le vede sul match e rimuove l'iscritto.
+    match /matches/{matchId}/replacementRequests/{requesterId} {
+      allow read: if isAdmin()
+        || isMatchOrganizer(matchId)
+        || isMatchGroupOwner(matchId)
+        || requesterId == uid();
+      allow create: if canWrite()
+        && requesterId == uid()
+        && request.resource.data.uid == uid()
+        && request.resource.data.matchId == matchId
+        && request.resource.data.status == 'open'
+        && request.resource.data.note is string
+        && request.resource.data.note.size() <= 300
+        && isMatchParticipant(matchId);
+      allow update: if isAdmin()
+        || isMatchOrganizer(matchId)
+        || isMatchGroupOwner(matchId)
+        || (
+          requesterId == uid()
+          && request.resource.data.status == 'open'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'note', 'status', 'createdAt', 'updatedAt', 'handledAt', 'handledBy'
+          ])
+        );
+      allow delete: if isAdmin()
+        || isMatchOrganizer(matchId)
+        || isMatchGroupOwner(matchId)
+        || requesterId == uid();
     }
 
     match /recurringMatches/{ruleId} {
@@ -305,6 +346,7 @@ service cloud.firestore {
         || isGroupOwner(groupId)
         || (
           isActiveMember(groupId)
+          && membership(groupId).role != 'guest'
           && (
             !groupData(groupId).keys().hasAll(['editInfoPolicy'])
             || groupData(groupId).editInfoPolicy == 'all'
@@ -327,6 +369,7 @@ service cloud.firestore {
         || isGroupOwner(groupId)
         || (
           isActiveMember(groupId)
+          && membership(groupId).role != 'guest'
           && (
             !groupData(groupId).keys().hasAll(['addMembersPolicy'])
             || groupData(groupId).addMembersPolicy == 'all'
@@ -416,6 +459,27 @@ service cloud.firestore {
             && request.resource.data.role == 'owner'
             && request.resource.data.status == 'active'
             && request.resource.data.inviteHash == null
+          )
+          // Ospite temporaneo: il fondatore aggiunge alla chat un giocatore
+          // approvato per una ricerca giocatori di un match del gruppo.
+          // L'accesso scade da solo (guestUntil) e non dà diritto a descrizione
+          // né codice invito.
+          || (
+            isGroupOwner(groupId)
+            && memberId != uid()
+            && request.resource.data.uid == memberId
+            && request.resource.data.role == 'guest'
+            && request.resource.data.status == 'active'
+            && request.resource.data.inviteHash == null
+            && request.resource.data.keys().hasAll(['guestRequestId', 'guestMatchId', 'guestUntil'])
+            && request.resource.data.guestRequestId is string
+            && request.resource.data.guestMatchId is string
+            && request.resource.data.guestUntil is timestamp
+            && request.resource.data.guestUntil <= request.time + duration.value(30, 'd')
+            && playerRequestExists(request.resource.data.guestRequestId)
+            && playerRequestData(request.resource.data.guestRequestId).groupId == groupId
+            && playerRequestData(request.resource.data.guestRequestId).organizerId == uid()
+            && getAfter(/databases/$(database)/documents/playerRequests/$(request.resource.data.guestRequestId)/applications/$(memberId)).data.status == 'approved'
           )
         );
 

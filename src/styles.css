@@ -1549,6 +1549,15 @@ textarea {
   max-width: 560px;
 }
 
+.replacement-box {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--line);
+}
+
 .offer-mini {
   display: flex;
   flex-direction: column;

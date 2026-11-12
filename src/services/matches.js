@@ -9,6 +9,8 @@ const OFFER_MS = LIMITS.offerMinutes * 60 * 1000;
 const HOUR_MS = 3600000;
 
 export const regPath = (matchId, uid) => `matches/${matchId}/registrations/${uid}`;
+export const replacementPath = (matchId, uid) =>
+  `matches/${matchId}/replacementRequests/${uid}`;
 
 export function listUpcomingMatches({ limit = 60, includeGroupPrivate = false } = {}) {
   return store
@@ -34,6 +36,68 @@ export function subscribeRegistrations(matchId, callback) {
     { orderBy: [['seq', 'asc']], limit: 200 },
     callback
   );
+}
+
+export function subscribeReplacementRequests(matchId, callback) {
+  return store.subscribeList(
+    `matches/${matchId}/replacementRequests`,
+    { orderBy: [['createdAt', 'asc']], limit: 50 },
+    callback
+  );
+}
+
+export function subscribeMyReplacementRequest(matchId, uid, callback) {
+  if (!uid) return () => {};
+  return store.subscribeDoc(replacementPath(matchId, uid), callback);
+}
+
+/**
+ * Chi non può più venire dopo la deadline chiede all'organizzatore di essere
+ * sostituito: la richiesta resta aperta finché non viene gestita.
+ */
+export async function requestReplacement({ matchId, match, user, note = '' }) {
+  if (!matchId || !user?.uid) throw new Error('Sessione non valida.');
+  const cleanNote = String(note || '').trim().slice(0, 300);
+  await store.setDoc(replacementPath(matchId, user.uid), {
+    uid: user.uid,
+    nickname: user.nickname || 'Giocatore',
+    matchId,
+    note: cleanNote,
+    status: 'open',
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+    handledAt: null,
+    handledBy: null,
+  });
+
+  if (match?.organizerId) {
+    await queuePush({
+      type: 'match',
+      title: 'Richiesta di sostituzione',
+      body: `${user.nickname || 'Un iscritto'} non può più venire a ${match.title || 'un match'}.`,
+      url: `/match/${matchId}`,
+      tag: `sostituzione-${matchId}`,
+      audience: 'user',
+      userId: match.organizerId,
+      matchId,
+      actorId: user.uid,
+    });
+  }
+}
+
+export async function cancelReplacementRequest({ matchId, uid }) {
+  if (!matchId || !uid) return;
+  await store.deleteDoc(replacementPath(matchId, uid));
+}
+
+export async function resolveReplacementRequest({ matchId, uid, reviewerUid }) {
+  if (!matchId || !uid) return;
+  await store.updateDoc(replacementPath(matchId, uid), {
+    status: 'handled',
+    handledAt: serverTimestamp(),
+    handledBy: reviewerUid || null,
+    updatedAt: serverTimestamp(),
+  });
 }
 
 export function subscribeMyOffers(uid, callback) {
@@ -106,10 +170,12 @@ async function leaveMatch(matchId, uid, { skipDeadline = false } = {}) {
     const status = regDoc.data.status;
     const organizerLeaving = match.organizerId === uid;
 
-    if (!skipDeadline) {
+    // La deadline blocca solo chi occupa un posto: dalla riserva si può uscire
+    // anche dopo (chi non può più venire chiede la sostituzione).
+    if (!skipDeadline && status === 'confirmed') {
       const deadline = toDate(match.deadlineAt);
       if (deadline && deadline.getTime() < Date.now()) {
-        throw new Error('Il termine per disiscriversi è passato: contatta l’organizzatore.');
+        throw new Error('Il termine per disiscriversi è passato: chiedi un sostituto.');
       }
     }
 
@@ -233,6 +299,16 @@ export async function cancelSignup({ matchId, uid }) {
 export async function removeParticipant({ matchId, uid }) {
   const result = await leaveMatch(matchId, uid, { skipDeadline: true });
   await notifyPromotedOffer(result, matchId);
+  // Se c'era una richiesta di sostituzione, la rimozione la chiude.
+  try {
+    await store.updateDoc(replacementPath(matchId, uid), {
+      status: 'handled',
+      handledAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+  } catch {
+    // Nessuna richiesta aperta: niente da aggiornare.
+  }
   return result;
 }
 

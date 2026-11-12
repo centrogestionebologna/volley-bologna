@@ -103,6 +103,7 @@ export function PlayerRequestCard({ message, currentUser }) {
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState('');
   const [approvedMatch, setApprovedMatch] = useState(null);
+  const [approvedGroup, setApprovedGroup] = useState(null);
 
   const requestState = useSubscription(
     (cb) => (requestId && isOrganizer ? subscribePlayerRequest(requestId, cb) : () => {}),
@@ -143,14 +144,18 @@ export function PlayerRequestCard({ message, currentUser }) {
   useEffect(() => {
     if (myApplication?.status !== 'approved' || !requestId) {
       setApprovedMatch(null);
+      setApprovedGroup(null);
       return undefined;
     }
     let active = true;
     store
       .getDoc(`playerRequests/${requestId}`)
       .then((doc) => {
-        if (!active || !doc?.data?.matchId) return;
-        setApprovedMatch({ id: doc.data.matchId, ...(doc.data.matchSummary || {}) });
+        if (!active || !doc?.data) return;
+        if (doc.data.matchId) {
+          setApprovedMatch({ id: doc.data.matchId, ...(doc.data.matchSummary || {}) });
+        }
+        setApprovedGroup(doc.data.groupId || null);
       })
       .catch(() => {});
     return () => {
@@ -187,12 +192,16 @@ export function PlayerRequestCard({ message, currentUser }) {
     setBusy(`${nextStatus}-${application.id}`);
     try {
       if (nextStatus === 'approved') {
-        await approveApplication({
+        const guest = await approveApplication({
           requestId,
           applicantUid: application.id,
           reviewerUid: currentUser?.uid,
         });
-        toast.success(`${application.nickname} è stato approvato.`);
+        toast.success(
+          guest
+            ? `${application.nickname} approvato e aggiunto alla chat del gruppo come ospite.`
+            : `${application.nickname} è stato approvato.`
+        );
       } else {
         await rejectApplication({
           requestId,
@@ -268,18 +277,30 @@ export function PlayerRequestCard({ message, currentUser }) {
       ) : myApplication ? (
         <div className={`chat-proposal-result ${myApplication.status}`}>
           {myApplication.status === 'approved' ? (
-            approvedMatch ? (
-              <Link
-                to={`/match/${approvedMatch.id}`}
-                className="chat-proposal-action"
-                onClick={(event) => event.stopPropagation()}
-              >
-                <span>Approvato · apri il match e iscriviti</span>
-                <ArrowRight size={15} />
-              </Link>
-            ) : (
-              <span>Approvato: l’organizzatore ti contatterà a breve.</span>
-            )
+            <>
+              {approvedMatch ? (
+                <Link
+                  to={`/match/${approvedMatch.id}`}
+                  className="chat-proposal-action"
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  <span>Approvato · apri il match e iscriviti</span>
+                  <ArrowRight size={15} />
+                </Link>
+              ) : (
+                <span>Approvato: l’organizzatore ti contatterà a breve.</span>
+              )}
+              {approvedGroup ? (
+                <Link
+                  to={`/gruppi/${approvedGroup}?focus=1`}
+                  className="chat-proposal-action"
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  <span>Sei ospite della chat del gruppo · aprila</span>
+                  <ArrowRight size={15} />
+                </Link>
+              ) : null}
+            </>
           ) : myApplication.status === 'rejected' ? (
             <span>Candidatura non accettata.</span>
           ) : (

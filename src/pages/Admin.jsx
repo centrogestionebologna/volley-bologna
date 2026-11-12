@@ -97,7 +97,7 @@ function OverviewTab({ onGoTo, toast }) {
       const result = await runScheduledMaintenance(store);
       setLastRun(result);
       toast.success(
-        `Manutenzione eseguita: ${result.pendingOffers} riserve aggiornate, ${result.messagesDeleted} messaggi eliminati, ${result.createdMatches} match pubblicati.`
+        `Manutenzione eseguita: ${result.pendingOffers} riserve aggiornate, ${result.messagesDeleted} messaggi eliminati, ${result.expiredGuests} ospiti rimossi, ${result.createdMatches} match pubblicati.`
       );
     } catch (error) {
       toast.error(error.message);

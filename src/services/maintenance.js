@@ -204,10 +204,40 @@ export async function publishRecurringMatches(storeApi) {
   return created;
 }
 
+/** Rimuove gli accessi ospite scaduti (giocatori aggiunti alla chat per un match). */
+export async function expireGuestMemberships(storeApi) {
+  const groups = await storeApi.listDocs('groups', { limit: 200 });
+  let removed = 0;
+
+  for (const group of groups) {
+    const guests = await storeApi.listDocs(`groups/${group.id}/members`, {
+      where: [['role', '==', 'guest']],
+      limit: 200,
+    });
+    const expired = guests.filter((row) => {
+      const until = toDate(row.data.guestUntil);
+      return until && until.getTime() < Date.now();
+    });
+    if (!expired.length) continue;
+
+    await Promise.all(
+      expired.map((row) => storeApi.deleteDoc(`groups/${group.id}/members/${row.id}`))
+    );
+    removed += expired.length;
+    await storeApi.updateDoc(`groups/${group.id}`, {
+      memberCount: Math.max(1, (group.data.memberCount || 1) - expired.length),
+      updatedAt: serverTimestamp(),
+    });
+  }
+
+  return removed;
+}
+
 /** Esegue tutta la manutenzione periodica (equivalente al cron Cloudflare). */
 export async function runScheduledMaintenance(storeApi) {
   const pendingOffers = await expireOverdueOffers(storeApi);
   const messagesDeleted = await purgeOldMessages(storeApi);
+  const expiredGuests = await expireGuestMemberships(storeApi);
   const createdMatches = await publishRecurringMatches(storeApi);
-  return { pendingOffers, messagesDeleted, createdMatches };
+  return { pendingOffers, messagesDeleted, expiredGuests, createdMatches };
 }

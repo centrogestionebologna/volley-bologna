@@ -13,6 +13,7 @@ import {
   MapPin,
   Megaphone,
   Pencil,
+  RefreshCw,
   RotateCcw,
   ShieldAlert,
   Star,
@@ -26,16 +27,21 @@ import { AGE_BANDS, LEVELS, LIMITS, labelOf } from '../config';
 import { useAsync, useSubscription } from '../lib/hooks';
 import { formatDateTime, formatEuros, toDate } from '../lib/format';
 import {
+  cancelReplacementRequest,
   cancelSignup,
   confirmSeat,
   declineSeat,
   ensureOrganizerRegistration,
   publishMatchToChat,
   removeParticipant,
+  requestReplacement,
+  resolveReplacementRequest,
   setMatchStatus,
   signUpForMatch,
   subscribeMatch,
+  subscribeMyReplacementRequest,
   subscribeRegistrations,
+  subscribeReplacementRequests,
 } from '../services/matches';
 import { subscribeRatings, subscribeTrusted, rateUser, setTrusted } from '../services/reputation';
 import { createReport, hasIdentityAccess } from '../services/moderation';
@@ -53,6 +59,11 @@ export function MatchDetail() {
 
   const match = matchState.data ? { id: matchState.data.id, ...matchState.data.data } : null;
   const registrations = (regsState.data || []).map((row) => ({ id: row.id, ...row.data }));
+  const myReplacementState = useSubscription(
+    (cb) => subscribeMyReplacementRequest(matchId, uid, cb),
+    [matchId, uid]
+  );
+  const myReplacement = myReplacementState.data?.data || null;
   const isOrganizer = Boolean(match && match.organizerId === uid);
   const groupState = useSubscription(
     (cb) => (match?.groupId ? store.subscribeDoc(`groups/${match.groupId}`, cb) : () => {}),
@@ -62,6 +73,13 @@ export function MatchDetail() {
     uid && match?.groupId && groupState.data?.data?.ownerId === uid
   );
   const canManageParticipants = isOrganizer || isAdmin || isGroupFounder;
+  // L'elenco completo delle richieste di sostituzione lo vede solo chi gestisce il match.
+  const replacementsState = useSubscription(
+    (cb) => (canManageParticipants ? subscribeReplacementRequests(matchId, cb) : () => {}),
+    [canManageParticipants, matchId]
+  );
+  const replacementRequests = (replacementsState.data || []).map((row) => ({ id: row.id, ...row.data }));
+  const openReplacements = replacementRequests.filter((row) => row.status === 'open');
 
   const trustedState = useSubscription(
     (cb) => (canManageParticipants ? subscribeTrusted(uid, cb) : () => {}),
@@ -76,6 +94,9 @@ export function MatchDetail() {
 
   const [busy, setBusy] = useState('');
   const [details, setDetails] = useState(null);
+  const [replacementOpen, setReplacementOpen] = useState(false);
+  const [replacementNote, setReplacementNote] = useState('');
+  const [replacementBusy, setReplacementBusy] = useState(false);
   const [irregularity, setIrregularity] = useState(null);
   const [reason, setReason] = useState('');
   const [ratingTarget, setRatingTarget] = useState(null);
@@ -194,6 +215,53 @@ export function MatchDetail() {
   const remove = (reg) => {
     if (!window.confirm(`Rimuovere ${reg.nickname} dal match?`)) return;
     run(`remove-${reg.uid}`, () => removeParticipant({ matchId, uid: reg.uid }), `${reg.nickname} rimosso.`);
+  };
+
+  const submitReplacement = async () => {
+    setReplacementBusy(true);
+    try {
+      await requestReplacement({
+        matchId,
+        match,
+        user: { uid, nickname: profile?.nickname || nickname },
+        note: replacementNote,
+      });
+      toast.success('Richiesta inviata: l’organizzatore cerca un sostituto per il tuo posto.');
+      setReplacementOpen(false);
+      setReplacementNote('');
+    } catch (error) {
+      toast.error(error.message || 'Richiesta non inviata.');
+    } finally {
+      setReplacementBusy(false);
+    }
+  };
+
+  const withdrawReplacement = () => {
+    if (!window.confirm('Ritirare la richiesta di sostituzione?')) return;
+    run(
+      'replacement-withdraw',
+      () => cancelReplacementRequest({ matchId, uid }),
+      'Richiesta ritirata.'
+    );
+  };
+
+  const handleReplacement = (request, action) => {
+    if (action === 'resolve') {
+      run(
+        `replacement-${request.uid}`,
+        () => resolveReplacementRequest({ matchId, uid: request.uid, reviewerUid: uid }),
+        'Richiesta segnata come gestita.'
+      );
+      return;
+    }
+    if (!window.confirm(`Rimuovere ${request.nickname} dal match? Il posto passerà alla riserva.`)) {
+      return;
+    }
+    run(
+      `replacement-${request.uid}`,
+      () => removeParticipant({ matchId, uid: request.uid }),
+      `${request.nickname} rimosso: il posto passa alla riserva.`
+    );
   };
 
   const openDetails = async (reg) => {
@@ -317,6 +385,7 @@ export function MatchDetail() {
   const renderParticipant = (reg, index, list) => {
     const isTrusted = trusted.has(reg.uid);
     const rating = myRatings.get(reg.uid);
+    const replacement = openReplacements.find((row) => row.uid === reg.uid);
     return (
       <li key={reg.id} className={`participant ${isTrusted ? 'participant-trusted' : ''}`}>
         <span className="participant-index">{index + 1}</span>
@@ -334,6 +403,7 @@ export function MatchDetail() {
                 : 'Iscritto'}
             {isTrusted ? ' · affidabile' : ''}
             {rating ? ` · tua valutazione ${rating.score}/5` : ''}
+            {replacement ? ' · ha chiesto la sostituzione' : ''}
           </small>
         </div>
         {isTrusted ? <Chip tone="green" icon={BadgeCheck}>Affidabile</Chip> : null}
@@ -522,6 +592,51 @@ export function MatchDetail() {
               <ul className="participant-list">{waitlist.map((reg, index) => renderParticipant(reg, index, waitlist))}</ul>
             )}
           </section>
+
+          {canManageParticipants && openReplacements.length ? (
+            <section className="card card-pad">
+              <div className="section-head">
+                <h2>
+                  Richieste di sostituzione{' '}
+                  <span className="count-badge">{openReplacements.length}</span>
+                </h2>
+                <Chip tone="amber" icon={RefreshCw}>Dopo la deadline</Chip>
+              </div>
+              <p className="muted small">
+                Questi iscritti non possono più venire. Rimuovendoli il posto passa
+                automaticamente alla prima riserva.
+              </p>
+              <ul className="participant-list">
+                {openReplacements.map((request) => (
+                  <li key={request.id} className="participant">
+                    <Avatar name={request.nickname} size="sm" />
+                    <div className="participant-info">
+                      <strong>{request.nickname}</strong>
+                      <small>{request.note || 'Non può più venire.'}</small>
+                    </div>
+                    <div className="participant-actions">
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        onClick={() => handleReplacement(request, 'remove')}
+                        disabled={busy === `replacement-${request.uid}`}
+                      >
+                        <UserMinus size={14} /> Rimuovi e passa alla riserva
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        onClick={() => handleReplacement(request, 'resolve')}
+                        disabled={busy === `replacement-${request.uid}`}
+                      >
+                        Segna gestita
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
         </div>
 
         <aside className="detail-side">
@@ -558,14 +673,46 @@ export function MatchDetail() {
                   type="button"
                   className="btn btn-ghost btn-block"
                   onClick={cancel}
-                  disabled={busy === 'cancel' || deadlinePassed}
+                  disabled={
+                    busy === 'cancel' || (deadlinePassed && myReg.status === 'confirmed')
+                  }
                 >
                   <Trash2 size={15} /> Disiscriviti
                 </button>
-                {deadlinePassed ? (
+                {deadlinePassed && myReg.status === 'confirmed' ? (
                   <p className="hint">
-                    Deadline superata: per disiscriverti contatta {match.organizerNickname}.
+                    Deadline superata: non puoi disiscriverti da solo, chiedi un sostituto a{' '}
+                    {match.organizerNickname}.
                   </p>
+                ) : null}
+                {deadlinePassed &&
+                myReg.status === 'confirmed' &&
+                match.status !== 'cancelled' &&
+                !started ? (
+                  myReplacement && myReplacement.status === 'open' ? (
+                    <div className="replacement-box">
+                      <p className="small">
+                        Hai chiesto la sostituzione: {match.organizerNickname} sta cercando un
+                        sostituto per il tuo posto.
+                      </p>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-block btn-sm"
+                        onClick={withdrawReplacement}
+                        disabled={busy === 'replacement-withdraw'}
+                      >
+                        Ritira la richiesta
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-block"
+                      onClick={() => setReplacementOpen(true)}
+                    >
+                      <RefreshCw size={15} /> Non posso venire: chiedi un sostituto
+                    </button>
+                  )
                 ) : null}
               </>
             ) : isBanned ? (
@@ -631,6 +778,40 @@ export function MatchDetail() {
           </section>
         </aside>
       </div>
+
+      <Modal
+        open={replacementOpen}
+        onClose={() => setReplacementOpen(false)}
+        title="Chiedi un sostituto"
+        subtitle="La deadline è passata: l’organizzatore gestirà la sostituzione dalla lista iscritti."
+        footer={
+          <>
+            <button type="button" className="btn btn-ghost" onClick={() => setReplacementOpen(false)}>
+              Annulla
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={submitReplacement}
+              disabled={replacementBusy}
+            >
+              Invia richiesta
+            </button>
+          </>
+        }
+      >
+        <label className="field">
+          <span className="field-label">Messaggio per l’organizzatore (facoltativo)</span>
+          <textarea
+            className="textarea"
+            rows={3}
+            maxLength={300}
+            value={replacementNote}
+            onChange={(event) => setReplacementNote(event.target.value)}
+            placeholder="Es. ho un infortunio e non riesco a venire…"
+          />
+        </label>
+      </Modal>
 
       <Modal
         open={Boolean(details)}
