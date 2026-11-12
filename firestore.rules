@@ -214,8 +214,13 @@ service cloud.firestore {
         || (
           (isMatchParticipant(matchId) || isMatchParticipantAfter(matchId))
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-            'confirmedCount', 'waitlistCount', 'registrationSeq', 'pendingOffer', 'pendingOfferUid', 'updatedAt'
+            'confirmedCount', 'waitlistCount', 'registrationSeq', 'logSeq',
+            'pendingOffer', 'pendingOfferUid', 'updatedAt'
           ])
+          && (
+            !('logSeq' in request.resource.data.diff(resource.data).affectedKeys())
+            || request.resource.data.get('logSeq', 0) > resource.data.get('logSeq', 0)
+          )
         )
         || isMatchGroupOwner(matchId);
       allow delete: if isAdmin() || isMatchOrganizer(matchId);
@@ -242,10 +247,23 @@ service cloud.firestore {
           && resource.data.status == 'waitlist'
           && request.resource.data.status == 'offered'
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'offerExpiresAt'])
+        )
+        || (
+          // Un'offerta ritirata riporta la riserva in lista.
+          signedIn()
+          && resource.data.status == 'offered'
+          && request.resource.data.status == 'waitlist'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'offerExpiresAt'])
         );
       allow delete: if isAdmin()
         || isMatchOrganizer(matchId)
         || isMatchGroupOwner(matchId)
+        || (
+          // Chi accetta una sostituzione libera il posto di chi l'ha chiesta.
+          signedIn()
+          && matchData(matchId).pendingOffer.uid == uid()
+          && matchData(matchId).pendingOffer.replacementFor == regId
+        )
         || (
           // Dopo la deadline chi ha un posto non si cancella da solo: chiede la
           // sostituzione. Chi è solo in riserva può uscire quando vuole.
@@ -281,13 +299,40 @@ service cloud.firestore {
           requesterId == uid()
           && request.resource.data.status == 'open'
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-            'note', 'status', 'createdAt', 'updatedAt', 'handledAt', 'handledBy'
+            'note', 'status', 'createdAt', 'updatedAt', 'handledAt', 'handledBy',
+            'filledAt', 'filledBy'
           ])
+        )
+        || (
+          // Chi accetta la sostituzione chiude la richiesta.
+          signedIn()
+          && requesterId != uid()
+          && request.resource.data.status == 'filled'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'status', 'filledBy', 'filledAt', 'updatedAt'
+          ])
+          && matchData(matchId).pendingOffer.uid == uid()
+          && matchData(matchId).pendingOffer.replacementFor == requesterId
         );
       allow delete: if isAdmin()
         || isMatchOrganizer(matchId)
         || isMatchGroupOwner(matchId)
         || requesterId == uid();
+    }
+
+    // Registro della lista: una voce per ogni evento, con progressivo (seq) e
+    // orario del server. Scrivono i client, mai gli utenti in silenzio.
+    match /matches/{matchId}/log/{entryId} {
+      allow read: if signedIn();
+      allow create: if canWrite()
+        && (request.resource.data.actorId == null || request.resource.data.actorId == uid())
+        && request.resource.data.seq is int
+        && request.resource.data.seq > 0
+        && request.resource.data.type is string
+        && request.resource.data.text is string
+        && request.resource.data.text.size() <= 160
+        && request.resource.data.at is timestamp;
+      allow update, delete: if isAdmin();
     }
 
     match /recurringMatches/{ruleId} {

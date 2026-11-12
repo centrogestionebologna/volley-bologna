@@ -8,6 +8,36 @@ import { queuePush } from './push';
 const OFFER_MS = LIMITS.offerMinutes * 60 * 1000;
 const HOUR_MS = 3600000;
 
+const logPath = (matchId, seq) => `matches/${matchId}/log/${String(seq).padStart(6, '0')}`;
+
+/**
+ * Registro della lista. Ogni voce prende un progressivo (logSeq) assegnato
+ * nella stessa transazione che modifica il match: l'ordine è quindi esatto
+ * anche con decine di iscrizioni nello stesso secondo (il timestamp da solo
+ * può pareggiare, il progressivo no).
+ */
+function createLog(tx, matchId, match) {
+  let seq = Number(match.logSeq) || 0;
+  return {
+    add(type, text, extra = {}) {
+      seq += 1;
+      tx.set(logPath(matchId, seq), {
+        seq,
+        at: serverTimestamp(),
+        type,
+        text: String(text || '').slice(0, 160),
+        uid: extra.uid || null,
+        nickname: extra.nickname || '',
+        actorId: extra.actorId || null,
+      });
+      return seq;
+    },
+    get lastSeq() {
+      return seq;
+    },
+  };
+}
+
 export const regPath = (matchId, uid) => `matches/${matchId}/registrations/${uid}`;
 export const replacementPath = (matchId, uid) =>
   `matches/${matchId}/replacementRequests/${uid}`;
@@ -38,6 +68,14 @@ export function subscribeRegistrations(matchId, callback) {
   );
 }
 
+export function subscribeMatchLog(matchId, callback) {
+  return store.subscribeList(
+    `matches/${matchId}/log`,
+    { orderBy: [['seq', 'asc']], limit: 200 },
+    callback
+  );
+}
+
 export function subscribeReplacementRequests(matchId, callback) {
   return store.subscribeList(
     `matches/${matchId}/replacementRequests`,
@@ -51,30 +89,96 @@ export function subscribeMyReplacementRequest(matchId, uid, callback) {
   return store.subscribeDoc(replacementPath(matchId, uid), callback);
 }
 
+/** Sceglie la prima riserva libera in ordine cronologico, saltando l'escluso. */
+function firstWaitlist(waitlist, excludeUid = null) {
+  return (
+    waitlist
+      .filter((row) => row.data.status === 'waitlist' && row.id !== excludeUid)
+      .sort((a, b) => (a.data.seq || 0) - (b.data.seq || 0))[0] || null
+  );
+}
+
 /**
- * Chi non può più venire dopo la deadline chiede all'organizzatore di essere
- * sostituito: la richiesta resta aperta finché non viene gestita.
+ * Chi non può più venire dopo la deadline chiede la sostituzione. Resta
+ * iscritto (quindi il fondatore vede ancora i suoi dati) finché qualcuno non
+ * accetta: il posto viene subito offerto alla prima riserva, in ordine.
  */
 export async function requestReplacement({ matchId, match, user, note = '' }) {
   if (!matchId || !user?.uid) throw new Error('Sessione non valida.');
   const cleanNote = String(note || '').trim().slice(0, 300);
-  await store.setDoc(replacementPath(matchId, user.uid), {
-    uid: user.uid,
-    nickname: user.nickname || 'Giocatore',
-    matchId,
-    note: cleanNote,
-    status: 'open',
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-    handledAt: null,
-    handledBy: null,
+  const nickname = user.nickname || 'Giocatore';
+
+  const result = await store.runTransaction(async (tx) => {
+    const matchDoc = await tx.get(`matches/${matchId}`);
+    if (!matchDoc) throw new Error('Match non trovato.');
+    const fresh = matchDoc.data;
+    const deadline = toDate(fresh.deadlineAt);
+    if (deadline && deadline.getTime() > Date.now()) {
+      throw new Error('La deadline non è ancora passata: puoi disiscriverti normalmente.');
+    }
+    const reg = await tx.get(regPath(matchId, user.uid));
+    if (!reg) throw new Error('Non risulti iscritto a questo match.');
+    const existing = await tx.get(replacementPath(matchId, user.uid));
+    const waitlist = fresh.pendingOffer
+      ? []
+      : await tx.query(`matches/${matchId}/registrations`, {
+          where: [['status', '==', 'waitlist']],
+        });
+    const next = firstWaitlist(waitlist, user.uid);
+
+    tx.set(replacementPath(matchId, user.uid), {
+      uid: user.uid,
+      nickname,
+      matchId,
+      note: cleanNote,
+      status: 'open',
+      createdAt: existing?.data?.createdAt || serverTimestamp(),
+      updatedAt: serverTimestamp(),
+      handledAt: null,
+      handledBy: null,
+      filledAt: null,
+      filledBy: null,
+    });
+
+    const log = createLog(tx, matchId, fresh);
+    log.add('replacement_request', `${nickname} non può venire: cerca un sostituto`, {
+      uid: user.uid,
+      nickname,
+      actorId: user.uid,
+    });
+
+    const patch = { updatedAt: serverTimestamp() };
+    if (next) {
+      const expiresAt = new Date(Date.now() + OFFER_MS);
+      tx.update(regPath(matchId, next.id), {
+        status: 'offered',
+        offerExpiresAt: expiresAt,
+      });
+      patch.pendingOffer = {
+        uid: next.id,
+        nickname: next.data.nickname || '',
+        seq: next.data.seq || 0,
+        expiresAt,
+        replacementFor: user.uid,
+        replacementRequestId: user.uid,
+      };
+      patch.pendingOfferUid = next.id;
+      log.add('offer', `Posto offerto in sostituzione a ${next.data.nickname || 'una riserva'}`, {
+        uid: next.id,
+        nickname: next.data.nickname || '',
+        actorId: user.uid,
+      });
+    }
+    tx.update(`matches/${matchId}`, { ...patch, logSeq: log.lastSeq });
+
+    return { offeredUid: next?.id || null, offeredNickname: next?.data?.nickname || null };
   });
 
   if (match?.organizerId) {
     await queuePush({
       type: 'match',
       title: 'Richiesta di sostituzione',
-      body: `${user.nickname || 'Un iscritto'} non può più venire a ${match.title || 'un match'}.`,
+      body: `${nickname} non può più venire a ${match.title || 'un match'}.`,
       url: `/match/${matchId}`,
       tag: `sostituzione-${matchId}`,
       audience: 'user',
@@ -83,20 +187,124 @@ export async function requestReplacement({ matchId, match, user, note = '' }) {
       actorId: user.uid,
     });
   }
+
+  if (result?.offeredUid) {
+    await queuePush({
+      type: 'offer',
+      title: 'Posto disponibile',
+      body: `Sei il primo in riserva per ${match?.title || 'un match'}: hai 30 minuti per accettare la sostituzione.`,
+      url: `/match/${matchId}`,
+      tag: `offerta-${matchId}`,
+      audience: 'user',
+      userId: result.offeredUid,
+      matchId,
+    });
+  }
+
+  return result;
+}
+
+/** L'organizzatore riprova a offrire il posto alla prima riserva. */
+export async function offerReplacementSeat({ matchId, requesterUid, actor }) {
+  return store.runTransaction(async (tx) => {
+    const matchDoc = await tx.get(`matches/${matchId}`);
+    if (!matchDoc) throw new Error('Match non trovato.');
+    const match = matchDoc.data;
+    if (match.pendingOffer) throw new Error('C’è già un’offerta in corso.');
+    const requestDoc = await tx.get(replacementPath(matchId, requesterUid));
+    if (!requestDoc || requestDoc.data.status !== 'open') {
+      throw new Error('Questa richiesta non è più aperta.');
+    }
+    const waitlist = await tx.query(`matches/${matchId}/registrations`, {
+      where: [['status', '==', 'waitlist']],
+    });
+    const next = firstWaitlist(waitlist, requesterUid);
+    if (!next) throw new Error('Nessuna riserva disponibile: puoi rimuovere l’iscritto.');
+
+    const expiresAt = new Date(Date.now() + OFFER_MS);
+    tx.update(regPath(matchId, next.id), { status: 'offered', offerExpiresAt: expiresAt });
+
+    const log = createLog(tx, matchId, match);
+    log.add('offer', `Posto offerto in sostituzione a ${next.data.nickname || 'una riserva'}`, {
+      uid: next.id,
+      nickname: next.data.nickname || '',
+      actorId: actor?.uid || null,
+    });
+
+    tx.update(`matches/${matchId}`, {
+      pendingOffer: {
+        uid: next.id,
+        nickname: next.data.nickname || '',
+        seq: next.data.seq || 0,
+        expiresAt,
+        replacementFor: requesterUid,
+        replacementRequestId: requesterUid,
+      },
+      pendingOfferUid: next.id,
+      updatedAt: serverTimestamp(),
+      logSeq: log.lastSeq,
+    });
+
+    return next.data.nickname || '';
+  });
 }
 
 export async function cancelReplacementRequest({ matchId, uid }) {
   if (!matchId || !uid) return;
-  await store.deleteDoc(replacementPath(matchId, uid));
+  await store.runTransaction(async (tx) => {
+    const matchDoc = await tx.get(`matches/${matchId}`);
+    if (!matchDoc) return;
+    const match = matchDoc.data;
+    const requestDoc = await tx.get(replacementPath(matchId, uid));
+    if (!requestDoc) return;
+    const offer = match.pendingOffer;
+    const offeredUid = offer?.replacementFor === uid ? offer.uid : null;
+    const offeredReg = offeredUid ? await tx.get(regPath(matchId, offeredUid)) : null;
+
+    tx.delete(replacementPath(matchId, uid));
+
+    const log = createLog(tx, matchId, match);
+    log.add('replacement_withdraw', `${requestDoc.data.nickname || 'Un iscritto'} ha ritirato la richiesta di sostituzione`, {
+      uid,
+      nickname: requestDoc.data.nickname || '',
+      actorId: uid,
+    });
+
+    const patch = { updatedAt: serverTimestamp() };
+    if (offeredUid && offeredReg) {
+      tx.update(regPath(matchId, offeredUid), { status: 'waitlist', offerExpiresAt: null });
+      patch.pendingOffer = null;
+      patch.pendingOfferUid = null;
+      log.add('offer', `Offerta ritirata: ${offeredReg.data.nickname || 'la riserva'} torna in lista`, {
+        uid: offeredUid,
+        nickname: offeredReg.data.nickname || '',
+        actorId: uid,
+      });
+    }
+    tx.update(`matches/${matchId}`, { ...patch, logSeq: log.lastSeq });
+  });
 }
 
 export async function resolveReplacementRequest({ matchId, uid, reviewerUid }) {
   if (!matchId || !uid) return;
-  await store.updateDoc(replacementPath(matchId, uid), {
-    status: 'handled',
-    handledAt: serverTimestamp(),
-    handledBy: reviewerUid || null,
-    updatedAt: serverTimestamp(),
+  await store.runTransaction(async (tx) => {
+    const matchDoc = await tx.get(`matches/${matchId}`);
+    const requestDoc = await tx.get(replacementPath(matchId, uid));
+    if (!matchDoc || !requestDoc) return;
+    const match = matchDoc.data;
+    tx.update(replacementPath(matchId, uid), {
+      status: 'handled',
+      handledAt: serverTimestamp(),
+      handledBy: reviewerUid || null,
+      updatedAt: serverTimestamp(),
+    });
+    const log = createLog(tx, matchId, match);
+    log.add('replacement_handled', `Richiesta di sostituzione di ${requestDoc.data.nickname || 'un iscritto'} segnata come gestita`, {
+      uid,
+      nickname: requestDoc.data.nickname || '',
+      actorId: reviewerUid || null,
+    });
+    tx.update(`matches/${matchId}`, { updatedAt: serverTimestamp(), logSeq: log.lastSeq });
   });
 }
 
@@ -137,6 +345,17 @@ export async function signUpForMatch({ matchId, user, nickname }) {
     const freeSeats = (match.confirmedCount || 0) < match.maxPlayers;
     const status = !hasOffer && freeSeats ? 'confirmed' : 'waitlist';
     const seq = (match.registrationSeq || 0) + 1;
+    const position =
+      status === 'confirmed' ? (match.confirmedCount || 0) + 1 : (match.waitlistCount || 0) + 1;
+
+    const log = createLog(tx, matchId, match);
+    log.add(
+      status === 'confirmed' ? 'signup' : 'waitlist',
+      status === 'confirmed'
+        ? `${nickname} si è iscritto (posto ${position}/${match.maxPlayers})`
+        : `${nickname} è entrato in lista riserva (#${position})`,
+      { uid: user.uid, nickname, actorId: user.uid }
+    );
 
     tx.set(regPath(matchId, user.uid), {
       uid: user.uid,
@@ -153,6 +372,7 @@ export async function signUpForMatch({ matchId, user, nickname }) {
       confirmedCount: (match.confirmedCount || 0) + (status === 'confirmed' ? 1 : 0),
       waitlistCount: (match.waitlistCount || 0) + (status === 'waitlist' ? 1 : 0),
       ...(match.organizerId === user.uid ? { organizerOptOut: false } : {}),
+      logSeq: log.lastSeq,
       updatedAt: serverTimestamp(),
     });
 
@@ -160,7 +380,7 @@ export async function signUpForMatch({ matchId, user, nickname }) {
   });
 }
 
-async function leaveMatch(matchId, uid, { skipDeadline = false } = {}) {
+async function leaveMatch(matchId, uid, { skipDeadline = false, actor = null } = {}) {
   return store.runTransaction(async (tx) => {
     const matchDoc = await tx.get(`matches/${matchId}`);
     const regDoc = await tx.get(regPath(matchId, uid));
@@ -182,11 +402,31 @@ async function leaveMatch(matchId, uid, { skipDeadline = false } = {}) {
     const shouldPromote =
       status === 'offered' || (status === 'confirmed' && !match.pendingOffer);
     const next = shouldPromote ? await pickNextWaitlist(tx, matchId) : null;
+    const replacementFor = match.pendingOffer?.replacementFor || null;
+    const replacementRequestId = match.pendingOffer?.replacementRequestId || null;
+    // Se esce proprio chi aveva chiesto la sostituzione, l'offerta in corso
+    // diventa una normale offerta per il posto libero.
+    const leavingRequester = Boolean(replacementFor) && replacementFor === uid;
 
     let confirmedCount = match.confirmedCount || 0;
     let waitlistCount = match.waitlistCount || 0;
     if (status === 'confirmed') confirmedCount = Math.max(0, confirmedCount - 1);
     else waitlistCount = Math.max(0, waitlistCount - 1);
+
+    const log = createLog(tx, matchId, match);
+    if (actor?.uid && actor.uid !== uid) {
+      log.add(
+        'remove',
+        `${regDoc.data.nickname || 'Un iscritto'} è stato rimosso da ${actor.nickname || 'un organizzatore'}`,
+        { uid, nickname: regDoc.data.nickname || '', actorId: actor.uid }
+      );
+    } else {
+      log.add('cancel', `${regDoc.data.nickname || 'Un iscritto'} ha annullato l’iscrizione`, {
+        uid,
+        nickname: regDoc.data.nickname || '',
+        actorId: uid,
+      });
+    }
 
     tx.delete(regPath(matchId, uid));
 
@@ -213,10 +453,25 @@ async function leaveMatch(matchId, uid, { skipDeadline = false } = {}) {
         nickname: next.data.nickname,
         seq: next.data.seq,
         expiresAt,
+        ...(replacementFor && !leavingRequester
+          ? { replacementFor, replacementRequestId }
+          : {}),
       };
       patch.pendingOfferUid = next.data.uid;
+      log.add('offer', `Posto offerto a ${next.data.nickname || 'una riserva'}`, {
+        uid: next.data.uid,
+        nickname: next.data.nickname || '',
+        actorId: actor?.uid || uid,
+      });
+    } else if (leavingRequester && match.pendingOffer) {
+      patch.pendingOffer = {
+        ...match.pendingOffer,
+        replacementFor: null,
+        replacementRequestId: null,
+      };
     }
 
+    patch.logSeq = log.lastSeq;
     tx.update(`matches/${matchId}`, patch);
     return {
       status,
@@ -240,6 +495,8 @@ export async function expirePendingOffer(matchId) {
 
     const expiredReg = await tx.get(regPath(matchId, offer.uid));
     const next = await pickNextWaitlist(tx, matchId);
+    const replacementFor = offer.replacementFor || null;
+    const replacementRequestId = offer.replacementRequestId || null;
 
     const patch = {
       pendingOffer: null,
@@ -247,6 +504,13 @@ export async function expirePendingOffer(matchId) {
       waitlistCount: Math.max(0, (match.waitlistCount || 0) - 1),
       updatedAt: serverTimestamp(),
     };
+
+    const log = createLog(tx, matchId, match);
+    log.add('offer_expired', `Offerta a ${offer.nickname || 'una riserva'} scaduta`, {
+      uid: offer.uid,
+      nickname: offer.nickname || '',
+      actorId: null,
+    });
 
     if (expiredReg) tx.delete(regPath(matchId, offer.uid));
 
@@ -261,10 +525,17 @@ export async function expirePendingOffer(matchId) {
         nickname: next.data.nickname,
         seq: next.data.seq,
         expiresAt: newExpiry,
+        ...(replacementFor ? { replacementFor, replacementRequestId } : {}),
       };
       patch.pendingOfferUid = next.data.uid;
+      log.add('offer', `Posto offerto a ${next.data.nickname || 'una riserva'}`, {
+        uid: next.data.uid,
+        nickname: next.data.nickname || '',
+        actorId: null,
+      });
     }
 
+    patch.logSeq = log.lastSeq;
     tx.update(`matches/${matchId}`, patch);
     return {
       changed: true,
@@ -296,8 +567,8 @@ export async function cancelSignup({ matchId, uid }) {
 }
 
 /** Rimozione da parte dell'organizzatore (o admin): nessun limite di deadline. */
-export async function removeParticipant({ matchId, uid }) {
-  const result = await leaveMatch(matchId, uid, { skipDeadline: true });
+export async function removeParticipant({ matchId, uid, actor = null }) {
+  const result = await leaveMatch(matchId, uid, { skipDeadline: true, actor });
   await notifyPromotedOffer(result, matchId);
   // Se c'era una richiesta di sostituzione, la rimozione la chiude.
   try {
@@ -333,17 +604,65 @@ export async function confirmSeat({ matchId, uid }) {
     const regDoc = await tx.get(regPath(matchId, uid));
     if (!matchDoc || !regDoc) throw new Error('Posto riservato non trovato.');
     const match = matchDoc.data;
-    if (!match.pendingOffer || match.pendingOffer.uid !== uid) {
+    const offer = match.pendingOffer;
+    if (!offer || offer.uid !== uid) {
       throw new Error('Non c’è nessun posto riservato per te su questo match.');
     }
-    const expiresAt = toDate(match.pendingOffer.expiresAt);
+    const expiresAt = toDate(offer.expiresAt);
     if (expiresAt && expiresAt.getTime() < Date.now() - 60000) {
       throw new Error('Tempo scaduto: il posto è stato riassegnato.');
     }
+
+    // Sostituzione: chi ha chiesto il cambio resta iscritto fino a questo
+    // momento, ora esce e l'offerta diventa un'iscrizione confermata.
+    const replacementFor = offer.replacementFor || null;
+    const replacedReg = replacementFor ? await tx.get(regPath(matchId, replacementFor)) : null;
+    const requestDoc = replacementFor
+      ? await tx.get(replacementPath(matchId, replacementFor))
+      : null;
+
+    const log = createLog(tx, matchId, match);
+    const who = regDoc.data.nickname || 'Una riserva';
+
+    if (replacementFor) {
+      if (replacedReg) tx.delete(regPath(matchId, replacementFor));
+      tx.update(regPath(matchId, uid), {
+        status: 'confirmed',
+        confirmedAt: serverTimestamp(),
+        offerExpiresAt: null,
+      });
+      if (requestDoc) {
+        tx.update(replacementPath(matchId, replacementFor), {
+          status: 'filled',
+          filledBy: uid,
+          filledAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      }
+      log.add(
+        'replacement',
+        `${who} prende il posto di ${replacedReg?.data?.nickname || 'un iscritto'} (sostituzione accettata)`,
+        { uid, nickname: who, actorId: uid }
+      );
+      tx.update(`matches/${matchId}`, {
+        waitlistCount: Math.max(0, (match.waitlistCount || 0) - 1),
+        pendingOffer: null,
+        pendingOfferUid: null,
+        updatedAt: serverTimestamp(),
+        logSeq: log.lastSeq,
+      });
+      return;
+    }
+
     tx.update(regPath(matchId, uid), {
       status: 'confirmed',
       confirmedAt: serverTimestamp(),
       offerExpiresAt: null,
+    });
+    log.add('confirm', `${who} ha confermato il posto`, {
+      uid,
+      nickname: who,
+      actorId: uid,
     });
     tx.update(`matches/${matchId}`, {
       confirmedCount: (match.confirmedCount || 0) + 1,
@@ -351,6 +670,7 @@ export async function confirmSeat({ matchId, uid }) {
       pendingOffer: null,
       pendingOfferUid: null,
       updatedAt: serverTimestamp(),
+      logSeq: log.lastSeq,
     });
   });
 }
@@ -366,6 +686,15 @@ export async function declineSeat({ matchId, uid }) {
     }
     const next = await pickNextWaitlist(tx, matchId);
     const waitlistCount = Math.max(0, (match.waitlistCount || 0) - 1);
+    const replacementFor = match.pendingOffer?.replacementFor || null;
+    const replacementRequestId = match.pendingOffer?.replacementRequestId || null;
+
+    const log = createLog(tx, matchId, match);
+    log.add(
+      'decline',
+      `${regDoc.data.nickname || 'Una riserva'} ha rifiutato l’offerta`,
+      { uid, nickname: regDoc.data.nickname || '', actorId: uid }
+    );
 
     tx.delete(regPath(matchId, uid));
     const patch = {
@@ -382,9 +711,16 @@ export async function declineSeat({ matchId, uid }) {
         nickname: next.data.nickname,
         seq: next.data.seq,
         expiresAt,
+        ...(replacementFor ? { replacementFor, replacementRequestId } : {}),
       };
       patch.pendingOfferUid = next.data.uid;
+      log.add('offer', `Posto offerto a ${next.data.nickname || 'una riserva'}`, {
+        uid: next.data.uid,
+        nickname: next.data.nickname || '',
+        actorId: uid,
+      });
     }
+    patch.logSeq = log.lastSeq;
     tx.update(`matches/${matchId}`, patch);
     return {
       promotedUid: next && next.id !== uid ? next.data.uid : null,
@@ -600,6 +936,12 @@ export async function ensureOrganizerRegistration({ matchId, match, organizer })
     if (existing) return false;
 
     const seq = (data.registrationSeq || 0) + 1;
+    const log = createLog(tx, matchId, data);
+    log.add(
+      'signup',
+      `${organizer.nickname} (organizzatore) è iscritto d’ufficio`,
+      { uid: organizer.uid, nickname: organizer.nickname, actorId: organizer.uid }
+    );
     tx.set(regPath(matchId, organizer.uid), {
       uid: organizer.uid,
       nickname: organizer.nickname,
@@ -612,6 +954,7 @@ export async function ensureOrganizerRegistration({ matchId, match, organizer })
     tx.update(`matches/${matchId}`, {
       registrationSeq: seq,
       confirmedCount: (data.confirmedCount || 0) + 1,
+      logSeq: log.lastSeq,
       updatedAt: serverTimestamp(),
     });
     return true;

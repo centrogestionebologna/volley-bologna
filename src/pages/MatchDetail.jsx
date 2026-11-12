@@ -5,6 +5,7 @@ import {
   BadgeCheck,
   CalendarClock,
   CalendarDays,
+  Clock,
   Euro,
   Flag,
   Gavel,
@@ -25,13 +26,14 @@ import { useAuth } from '../auth/AuthProvider';
 import { store } from '../backend';
 import { AGE_BANDS, LEVELS, LIMITS, labelOf } from '../config';
 import { useAsync, useSubscription } from '../lib/hooks';
-import { formatDateTime, formatEuros, toDate } from '../lib/format';
+import { formatDateShort, formatDateTime, formatEuros, toDate } from '../lib/format';
 import {
   cancelReplacementRequest,
   cancelSignup,
   confirmSeat,
   declineSeat,
   ensureOrganizerRegistration,
+  offerReplacementSeat,
   publishMatchToChat,
   removeParticipant,
   requestReplacement,
@@ -39,6 +41,7 @@ import {
   setMatchStatus,
   signUpForMatch,
   subscribeMatch,
+  subscribeMatchLog,
   subscribeMyReplacementRequest,
   subscribeRegistrations,
   subscribeReplacementRequests,
@@ -48,6 +51,20 @@ import { createReport, hasIdentityAccess } from '../services/moderation';
 import { Avatar, Chip, EmptyState, Modal, PageHead, Progress, Spinner } from '../components/ui';
 import { Countdown } from '../components/Countdown';
 import { useToast } from '../components/Toast';
+
+function clockLabel(value) {
+  const date = toDate(value);
+  if (!date) return '';
+  const time = date.toLocaleTimeString('it-IT', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  });
+  const today = new Date();
+  const sameDay = date.toDateString() === today.toDateString();
+  return sameDay ? time : `${formatDateShort(date)} · ${time}`;
+}
 
 export function MatchDetail() {
   const { matchId } = useParams();
@@ -137,6 +154,11 @@ export function MatchDetail() {
   ]);
 
   const myReg = registrations.find((reg) => reg.uid === uid);
+  const logState = useSubscription(
+    (cb) => (myReg || canManageParticipants ? subscribeMatchLog(matchId, cb) : () => {}),
+    [matchId, Boolean(myReg), canManageParticipants]
+  );
+  const logEntries = (logState.data || []).map((row) => ({ id: row.id, ...row.data }));
   const confirmed = registrations
     .filter((reg) => reg.status === 'confirmed')
     .sort((a, b) => (a.seq || 0) - (b.seq || 0));
@@ -214,7 +236,16 @@ export function MatchDetail() {
 
   const remove = (reg) => {
     if (!window.confirm(`Rimuovere ${reg.nickname} dal match?`)) return;
-    run(`remove-${reg.uid}`, () => removeParticipant({ matchId, uid: reg.uid }), `${reg.nickname} rimosso.`);
+    run(
+      `remove-${reg.uid}`,
+      () =>
+        removeParticipant({
+          matchId,
+          uid: reg.uid,
+          actor: { uid, nickname: profile?.nickname || nickname },
+        }),
+      `${reg.nickname} rimosso.`
+    );
   };
 
   const submitReplacement = async () => {
@@ -259,10 +290,27 @@ export function MatchDetail() {
     }
     run(
       `replacement-${request.uid}`,
-      () => removeParticipant({ matchId, uid: request.uid }),
+      () =>
+        removeParticipant({
+          matchId,
+          uid: request.uid,
+          actor: { uid, nickname: profile?.nickname || nickname },
+        }),
       `${request.nickname} rimosso: il posto passa alla riserva.`
     );
   };
+
+  const handleOfferReplacement = (request) =>
+    run(
+      `replacement-${request.uid}`,
+      () =>
+        offerReplacementSeat({
+          matchId,
+          requesterUid: request.uid,
+          actor: { uid, nickname: profile?.nickname || nickname },
+        }),
+      'Posto offerto alla prima riserva.'
+    );
 
   const openDetails = async (reg) => {
     setBusy(`details-${reg.uid}`);
@@ -612,9 +660,24 @@ export function MatchDetail() {
                     <Avatar name={request.nickname} size="sm" />
                     <div className="participant-info">
                       <strong>{request.nickname}</strong>
-                      <small>{request.note || 'Non può più venire.'}</small>
+                      <small>
+                        {request.note || 'Non può più venire.'}
+                        {match.pendingOffer?.replacementFor === request.uid
+                          ? ` · offerta a ${match.pendingOffer.nickname} (scade tra ${LIMITS.offerMinutes} min)`
+                          : ' · nessuna offerta attiva'}
+                      </small>
                     </div>
                     <div className="participant-actions">
+                      {match.pendingOffer?.replacementFor === request.uid ? null : (
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          onClick={() => handleOfferReplacement(request)}
+                          disabled={busy === `replacement-${request.uid}`}
+                        >
+                          <RefreshCw size={14} /> Offri alla riserva
+                        </button>
+                      )}
                       <button
                         type="button"
                         className="btn btn-ghost btn-sm"
@@ -635,6 +698,30 @@ export function MatchDetail() {
                   </li>
                 ))}
               </ul>
+            </section>
+          ) : null}
+
+          {myReg || canManageParticipants ? (
+            <section className="card card-pad">
+              <div className="section-head">
+                <h2>
+                  Registro della lista{' '}
+                  <span className="count-badge">{logEntries.length}</span>
+                </h2>
+                <Chip tone="muted" icon={Clock}>Orario al secondo</Chip>
+              </div>
+              {logEntries.length === 0 ? (
+                <p className="muted small">Nessun movimento registrato.</p>
+              ) : (
+                <ul className="match-log">
+                  {[...logEntries].reverse().map((entry) => (
+                    <li key={entry.id}>
+                      <time>{clockLabel(entry.at)}</time>
+                      <span>{entry.text}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </section>
           ) : null}
         </div>
@@ -692,8 +779,9 @@ export function MatchDetail() {
                   myReplacement && myReplacement.status === 'open' ? (
                     <div className="replacement-box">
                       <p className="small">
-                        Hai chiesto la sostituzione: {match.organizerNickname} sta cercando un
-                        sostituto per il tuo posto.
+                        {match.pendingOffer?.replacementFor === uid
+                          ? `Offerta inviata a ${match.pendingOffer.nickname}: resti iscritto finché non accetta.`
+                          : 'Hai chiesto la sostituzione: resti iscritto finché qualcuno non accetta.'}
                       </p>
                       <button
                         type="button"

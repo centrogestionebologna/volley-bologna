@@ -526,12 +526,17 @@ async function expireOne(env, db, match, now) {
   if (!offer?.expiresAt) return false;
   if (new Date(offer.expiresAt).getTime() > now) return false;
 
+  const matchId = match.path.split('/').pop();
   const waitlist = await db.query(`${match.path}/registrations`, {
     where: ['status', '==', 'waitlist'],
   });
   waitlist.sort((a, b) => (a.data.seq || 0) - (b.data.seq || 0));
   const next = waitlist.find((row) => row.id !== offer.uid);
   const expiredReg = await db.getDoc(`${match.path}/registrations/${offer.uid}`);
+  // Se l'offerta nasce da una sostituzione, chi l'ha chiesta resta iscritto
+  // finché qualcuno non accetta: i riferimenti vanno riportati sull'offerta successiva.
+  const replacementFor = offer.replacementFor || null;
+  const replacementRequestId = offer.replacementRequestId || null;
 
   const writes = [];
   const patch = {
@@ -540,6 +545,32 @@ async function expireOne(env, db, match, now) {
     updatedAt: new Date(now),
     waitlistCount: fresh.data.waitlistCount || 0,
   };
+
+  let logSeq = Number(fresh.data.logSeq) || 0;
+  const pushLog = (type, text, uid, nickname) => {
+    logSeq += 1;
+    writes.push({
+      update: {
+        name: documentName(env, `matches/${matchId}/log/${String(logSeq).padStart(6, '0')}`),
+        fields: toFields({
+          seq: logSeq,
+          at: new Date(now),
+          type,
+          text: String(text).slice(0, 160),
+          uid: uid || null,
+          nickname: nickname || '',
+          actorId: null,
+        }),
+      },
+    });
+  };
+
+  pushLog(
+    'offer_expired',
+    `Offerta a ${offer.nickname || 'una riserva'} scaduta`,
+    offer.uid,
+    offer.nickname || ''
+  );
 
   if (expiredReg && expiredReg.data.status === 'offered') {
     writes.push({ delete: documentName(env, `${match.path}/registrations/${offer.uid}`) });
@@ -560,10 +591,13 @@ async function expireOne(env, db, match, now) {
       nickname: next.data.nickname || '',
       seq: next.data.seq || 0,
       expiresAt,
+      ...(replacementFor ? { replacementFor, replacementRequestId } : {}),
     };
     patch.pendingOfferUid = next.id;
+    pushLog('offer', `Posto offerto a ${next.data.nickname || 'una riserva'}`, next.id, next.data.nickname || '');
   }
 
+  patch.logSeq = logSeq;
   writes.push({
     update: {
       name: documentName(env, match.path),
@@ -576,7 +610,6 @@ async function expireOne(env, db, match, now) {
   await db.commit(writes);
 
   if (next) {
-    const matchId = match.path.split('/').pop();
     await enqueuePush(db, {
       type: 'offer',
       title: 'Posto disponibile',
