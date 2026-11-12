@@ -2,6 +2,7 @@ import { store } from '../backend';
 import { serverTimestamp } from '../store/base';
 import { LIMITS } from '../config';
 import { findBannedWord } from './moderation';
+import { queuePush } from './push';
 import { toDate } from '../lib/format';
 
 export const generalChatPath = 'chats/general/messages';
@@ -48,7 +49,7 @@ function validateText(text, bannedWords) {
 
 export async function sendMessage({ path, author, text, replyTo = null, bannedWords = [] }) {
   const clean = validateText(text, bannedWords);
-  return store.addDoc(path, {
+  const messageId = await store.addDoc(path, {
     authorId: author.uid,
     authorNickname: author.nickname,
     text: clean,
@@ -64,6 +65,22 @@ export async function sendMessage({ path, author, text, replyTo = null, bannedWo
         }
       : null,
   });
+
+  const segments = String(path).split('/').filter(Boolean);
+  const isGeneral = path === generalChatPath;
+  const groupId = !isGeneral && segments[0] === 'groups' ? segments[1] : null;
+  await queuePush({
+    type: 'chat',
+    title: author.nickname || 'Nuovo messaggio',
+    body: clean,
+    url: isGeneral ? '/chat' : `/gruppi/${groupId}`,
+    tag: isGeneral ? 'chat-generale' : `chat-${groupId}`,
+    audience: isGeneral ? 'all' : 'group',
+    groupId,
+    actorId: author.uid,
+  });
+
+  return messageId;
 }
 
 function matchSnapshot(match = {}) {

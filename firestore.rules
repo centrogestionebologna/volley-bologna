@@ -61,6 +61,15 @@ service cloud.firestore {
         && exists(/databases/$(database)/documents/matches/$(id)/registrations/$(uid()));
     }
 
+    // Dentro una transazione exists() vede il database com'è PRIMA: la nuova
+    // iscrizione non c'è ancora. existsAfter() considera anche le scritture
+    // della stessa transazione, quindi l'aggiornamento dei contatori del match
+    // può essere validato insieme alla creazione della registrazione.
+    function isMatchParticipantAfter(id) {
+      return signedIn()
+        && existsAfter(/databases/$(database)/documents/matches/$(id)/registrations/$(uid()));
+    }
+
     function groupExists(id) {
       return exists(/databases/$(database)/documents/groups/$(id));
     }
@@ -202,13 +211,13 @@ service cloud.firestore {
         );
       allow update: if isAdmin()
         || isMatchOrganizer(matchId)
-        || isMatchGroupOwner(matchId)
         || (
-          isMatchParticipant(matchId)
+          (isMatchParticipant(matchId) || isMatchParticipantAfter(matchId))
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
             'confirmedCount', 'waitlistCount', 'registrationSeq', 'pendingOffer', 'pendingOfferUid', 'updatedAt'
           ])
-        );
+        )
+        || isMatchGroupOwner(matchId);
       allow delete: if isAdmin() || isMatchOrganizer(matchId);
     }
 
@@ -592,6 +601,40 @@ service cloud.firestore {
     match /disputes/{disputeId} {
       allow create: if signedIn() && request.resource.data.organizerId == uid();
       allow read, update, delete: if isAdmin();
+    }
+
+    // ── Notifiche push ──────────────────────────────────────────────────────
+    // Ogni utente gestisce solo le proprie subscription (un documento per utente,
+    // con una mappa di dispositivi). Le legge il Worker con il service account.
+    match /pushSubscriptions/{userId} {
+      allow get, create, update, delete: if isSelf(userId);
+      allow list: if false;
+    }
+
+    // Coda delle notifiche: la scrivono gli utenti, la svuota solo il Worker
+    // (service account, che bypassa le regole).
+    match /pushJobs/{jobId} {
+      allow create: if canWrite()
+        && (request.resource.data.actorId == uid() || isAdmin())
+        && request.resource.data.type is string
+        && request.resource.data.title is string
+        && request.resource.data.title.size() > 0
+        && request.resource.data.title.size() <= 120
+        && request.resource.data.body is string
+        && request.resource.data.body.size() <= 240
+        && request.resource.data.url is string
+        && request.resource.data.url.size() <= 200
+        && request.resource.data.audience in ['all', 'group', 'user', 'match']
+        && (
+          request.resource.data.audience != 'group'
+          || (
+            request.resource.data.groupId is string
+            && isActiveMember(request.resource.data.groupId)
+          )
+        )
+        && (request.resource.data.audience != 'user' || request.resource.data.userId is string)
+        && (request.resource.data.audience != 'match' || request.resource.data.matchId is string);
+      allow read, update, delete: if false;
     }
 
     // Tutto il resto è chiuso.

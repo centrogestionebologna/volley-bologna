@@ -2,6 +2,7 @@ import { serverTimestamp } from '../store/base';
 import { toDate, dateKey, pad } from '../lib/format';
 import { LIMITS, retentionDaysForSetting } from '../config';
 import { expirePendingOffer, regPath } from './matches';
+import { queuePush } from './push';
 
 const DAYS_AHEAD = 31;
 
@@ -163,6 +164,17 @@ export async function publishRecurringMatches(storeApi) {
       try {
         await storeApi.setDoc(`matches/${docId}`, matchData);
         created += 1;
+        await queuePush({
+          type: 'match',
+          title: 'Nuovo match',
+          body: `${matchData.title} · ${matchData.gym}`,
+          url: `/match/${docId}`,
+          tag: `match-${docId}`,
+          audience: matchData.visibility === 'group-private' ? 'group' : 'all',
+          groupId: matchData.groupId || null,
+          matchId: docId,
+          actorId: rule.organizerId,
+        });
         if (rule.organizerId) {
           try {
             await storeApi.setDoc(regPath(docId, rule.organizerId), {

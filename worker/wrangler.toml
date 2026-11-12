@@ -1,9 +1,10 @@
-# Cloudflare Worker per la manutenzione automatica di Volley Bologna Community.
+# Cloudflare Worker per notifiche push e manutenzione di Volley Bologna Community.
 # Deploy:  cd worker && npx wrangler deploy
 # Secrets: npx wrangler secret put FIREBASE_CLIENT_EMAIL
 #          npx wrangler secret put FIREBASE_PRIVATE_KEY
+#          npx wrangler secret put VAPID_PRIVATE_KEY
 #          npx wrangler secret put MAINTENANCE_SECRET
-name = "volley-bologna-cron"
+name = "volley-bologna-push"
 main = "src/index.js"
 compatibility_date = "2026-01-01"
 
@@ -11,9 +12,14 @@ compatibility_date = "2026-01-01"
 enabled = true
 
 [triggers]
-# Ogni 10 minuti: offerte riserve scadute. Alle 03:xx UTC pulizia chat (30 giorni),
-# alle 05:xx UTC pubblicazione dei match ricorrenti.
-crons = ["*/10 * * * *"]
+# Ogni minuto: svuota la coda delle notifiche push.
+# Nello stesso giro: ogni 10 minuti le offerte scadute, alle 03:00 Roma la pulizia
+# delle chat (30 giorni), alle 05:00 Roma la pubblicazione dei match ricorrenti.
+crons = ["* * * * *"]
 
 [vars]
 FIREBASE_PROJECT_ID = "sostituisci-con-il-tuo-project-id"
+# Chiave pubblica VAPID (la stessa che finisce in VITE_VAPID_PUBLIC_KEY).
+VAPID_PUBLIC_KEY = "sostituisci-con-la-chiave-pubblica"
+# mailto: o URL del sito: obbligatorio per i push service (RFC 8292).
+VAPID_SUBJECT = "mailto:tua-email@example.com"

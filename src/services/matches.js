@@ -3,6 +3,7 @@ import { serverTimestamp } from '../store/base';
 import { LIMITS } from '../config';
 import { toDate, dateKey, timeKey } from '../lib/format';
 import { postMatchProposal, postMatchProposalToGroup } from './chat';
+import { queuePush } from './push';
 
 const OFFER_MS = LIMITS.offerMinutes * 60 * 1000;
 const HOUR_MS = 3600000;
@@ -151,13 +152,18 @@ async function leaveMatch(matchId, uid, { skipDeadline = false } = {}) {
     }
 
     tx.update(`matches/${matchId}`, patch);
-    return { status, promoted: next?.data?.nickname || null };
+    return {
+      status,
+      promoted: next?.data?.nickname || null,
+      promotedUid: next?.data?.uid || null,
+      matchTitle: match.title || '',
+    };
   });
 }
 
 /** Usato dalla manutenzione: se l'offerta è scaduta la rimuove e passa alla riserva successiva. */
 export async function expirePendingOffer(matchId) {
-  return store.runTransaction(async (tx) => {
+  const result = await store.runTransaction(async (tx) => {
     const matchDoc = await tx.get(`matches/${matchId}`);
     if (!matchDoc) return false;
     const match = matchDoc.data;
@@ -194,17 +200,55 @@ export async function expirePendingOffer(matchId) {
     }
 
     tx.update(`matches/${matchId}`, patch);
-    return true;
+    return {
+      changed: true,
+      promotedUid: next && next.id !== offer.uid ? next.data.uid : null,
+      matchTitle: match.title || '',
+    };
   });
+
+  if (result?.promotedUid) {
+    await queuePush({
+      type: 'offer',
+      title: 'Posto disponibile',
+      body: `Hai 30 minuti per confermare il posto su ${result.matchTitle || 'questo match'}.`,
+      url: `/match/${matchId}`,
+      tag: `offerta-${matchId}`,
+      audience: 'user',
+      userId: result.promotedUid,
+      matchId,
+    });
+  }
+
+  return Boolean(result?.changed);
 }
 
 export async function cancelSignup({ matchId, uid }) {
-  return leaveMatch(matchId, uid, { skipDeadline: false });
+  const result = await leaveMatch(matchId, uid, { skipDeadline: false });
+  await notifyPromotedOffer(result, matchId);
+  return result;
 }
 
 /** Rimozione da parte dell'organizzatore (o admin): nessun limite di deadline. */
 export async function removeParticipant({ matchId, uid }) {
-  return leaveMatch(matchId, uid, { skipDeadline: true });
+  const result = await leaveMatch(matchId, uid, { skipDeadline: true });
+  await notifyPromotedOffer(result, matchId);
+  return result;
+}
+
+/** Avvisa chi è appena passato dalla lista riserve al posto offerto. */
+async function notifyPromotedOffer(result, matchId) {
+  if (!result?.promotedUid) return;
+  await queuePush({
+    type: 'offer',
+    title: 'Posto disponibile',
+    body: `Hai 30 minuti per confermare il posto su ${result.matchTitle || 'questo match'}.`,
+    url: `/match/${matchId}`,
+    tag: `offerta-${matchId}`,
+    audience: 'user',
+    userId: result.promotedUid,
+    matchId,
+  });
 }
 
 export async function confirmSeat({ matchId, uid }) {
@@ -236,7 +280,7 @@ export async function confirmSeat({ matchId, uid }) {
 }
 
 export async function declineSeat({ matchId, uid }) {
-  return store.runTransaction(async (tx) => {
+  const result = await store.runTransaction(async (tx) => {
     const matchDoc = await tx.get(`matches/${matchId}`);
     const regDoc = await tx.get(regPath(matchId, uid));
     if (!matchDoc || !regDoc) throw new Error('Posto riservato non trovato.');
@@ -266,7 +310,14 @@ export async function declineSeat({ matchId, uid }) {
       patch.pendingOfferUid = next.data.uid;
     }
     tx.update(`matches/${matchId}`, patch);
+    return {
+      promotedUid: next && next.id !== uid ? next.data.uid : null,
+      matchTitle: match.title || '',
+    };
   });
+
+  await notifyPromotedOffer(result, matchId);
+  return result;
 }
 
 function normalizeMatchInput(input) {
@@ -435,6 +486,18 @@ export async function createMatch(
     });
     await store.updateDoc(`matches/${matchId}`, { recurringId: `rec-${matchId}` });
   }
+
+  await queuePush({
+    type: 'match',
+    title: 'Nuovo match',
+    body: `${data.title} · ${data.gym}`,
+    url: `/match/${matchId}`,
+    tag: `match-${matchId}`,
+    audience: isGroupPrivate ? 'group' : 'all',
+    groupId: group?.id || null,
+    matchId,
+    actorId: organizer.uid,
+  });
 
   return matchId;
 }

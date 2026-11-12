@@ -2,6 +2,7 @@ import { store } from '../backend';
 import { DEFAULT_GROUP_SETTINGS, normalizeGroupSettings } from '../config';
 import { serverTimestamp } from '../store/base';
 import { sha256Hex, generateInviteCode, normalizeInviteCode } from '../lib/crypto';
+import { queuePush } from './push';
 
 const memberPath = (groupId, uid) => `groups/${groupId}/members/${uid}`;
 
@@ -113,7 +114,8 @@ export async function createGroup({ name, description = '', visibility, owner, a
 
 export async function joinGroup({ groupId, user, inviteCode = '' }) {
   const invite = normalizeInviteCode(inviteCode);
-  return store.runTransaction(async (tx) => {
+  let pendingNotify = null;
+  const status = await store.runTransaction(async (tx) => {
     const groupDoc = await tx.get(`groups/${groupId}`);
     if (!groupDoc) throw new Error('Gruppo non trovato.');
     const group = groupDoc.data;
@@ -130,6 +132,9 @@ export async function joinGroup({ groupId, user, inviteCode = '' }) {
       inviteHash = await sha256Hex(invite);
       status = group.visibility === 'private' && group.approveNewMembers === true ? 'pending' : 'active';
     }
+    pendingNotify = status === 'pending'
+      ? { ownerId: group.ownerId, groupName: group.name || 'Gruppo' }
+      : null;
 
     tx.set(memberPath(groupId, user.uid), {
       uid: user.uid,
@@ -155,6 +160,21 @@ export async function joinGroup({ groupId, user, inviteCode = '' }) {
 
     return status;
   });
+
+  if (status === 'pending' && pendingNotify?.ownerId) {
+    await queuePush({
+      type: 'group',
+      title: 'Nuova richiesta di accesso',
+      body: `${user.nickname || 'Un utente'} vuole entrare in ${pendingNotify.groupName}.`,
+      url: `/gruppi/${groupId}`,
+      tag: `gruppo-${groupId}`,
+      audience: 'user',
+      userId: pendingNotify.ownerId,
+      actorId: user.uid,
+    });
+  }
+
+  return status;
 }
 
 export async function joinGroupByCode({ code, user }) {

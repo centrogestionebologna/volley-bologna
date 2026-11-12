@@ -93,6 +93,7 @@ npm run preview
 ```
 public/
   community-logo.png     logo della community (favicon e interfaccia)
+  push-sw.js             service worker delle notifiche push
 src/
   config.js              env Firebase, controllo config, limiti prodotto (retention 30gg, offerte 30min)
   backend.js             unico backend: Cloud Firestore (null se manca la config)
@@ -110,13 +111,16 @@ src/
     reputation.js        liste affidabili per organizzatore, valutazioni
     moderation.js        parole vietate, segnalazioni, ban, mute
     maintenance.js       pulizia chat e pubblicazione match ricorrenti
+    push.js              subscription push e coda notifiche
   components/            shell, chat, card match, UI kit, countdown, emoji picker,
                          Logo, SetupScreen
   pages/                 Login, Home, Match, Gruppi, Chat, Profilo, Admin, Organizer
   lib/                   formattazione date, hook, hashing inviti
 worker/
-  src/index.js           cron: offerte riserve scadute, pulizia 30gg, match ricorrenti
+  src/index.js           cron ogni minuto: push, offerte scadute, pulizia 30gg, ricorrenze
   src/firestore.js       client Firestore REST con service account (JWT RS256)
+  src/webpush.js         VAPID + cifratura aes128gcm con Web Crypto (nessuna dipendenza)
+  cloudflare-dashboard.js  file unico da incollare nel dashboard Cloudflare
 firestore.rules          regole di sicurezza
 firestore.indexes.json   indici compositi
 firebase.json            config CLI Firebase
@@ -166,7 +170,7 @@ Dalla pagina **Organizza** si attiva/disattiva la ricorrenza.
 
 ---
 
-## 5. Cloudflare Worker (cron)
+## 5. Cloudflare Worker `volley-bologna-push`
 
 ```bash
 cd worker
@@ -174,34 +178,57 @@ npm install
 npx wrangler login
 ```
 
-Imposta il project id in `worker/wrangler.toml` (`FIREBASE_PROJECT_ID`) e i secret:
+Imposta in `worker/wrangler.toml` il project id (`FIREBASE_PROJECT_ID`), la chiave pubblica VAPID
+(`VAPID_PUBLIC_KEY`) e il soggetto (`VAPID_SUBJECT`); i valori riservati vanno come secret:
 
 ```bash
 npx wrangler secret put FIREBASE_CLIENT_EMAIL   # service account Firebase
 npx wrangler secret put FIREBASE_PRIVATE_KEY    # chiave privata (con \n escapati)
+npx wrangler secret put VAPID_PRIVATE_KEY       # chiave privata VAPID
 npx wrangler secret put MAINTENANCE_SECRET      # token per chiamate manuali
 ```
 
 Service account: Firebase Console → Impostazioni progetto → Service account → *Genera nuova chiave privata*.
 Il worker usa l'API REST di Firestore con un JWT firmato RS256 (nessun SDK Node, gira nel runtime Workers).
 
+### Chiavi VAPID (una volta sola)
+
+```bash
+npx web-push generate-vapid-keys
+```
+
+- chiave **pubblica** → `VAPID_PUBLIC_KEY` in `worker/wrangler.toml` **e** `VITE_VAPID_PUBLIC_KEY`
+  in `.env.local` e nelle env di build Cloudflare (è pubblica, finisce nel bundle);
+- chiave **privata** → solo secret `VAPID_PRIVATE_KEY` del Worker;
+- `VAPID_SUBJECT` → `mailto:` della community oppure l'URL del sito.
+
+Le notifiche funzionano su Chrome, Edge, Firefox e Safari 16.4+; su iPhone servono solo dopo
+aver aggiunto il sito alla schermata Home (PWA installata).
+
 Deploy e test:
 
 ```bash
 npx wrangler deploy
-curl "https://volley-bologna-cron.<account>.workers.dev/run?key=$MAINTENANCE_SECRET" -X POST
+curl "https://volley-bologna-push.<account>.workers.dev/health"
+curl "https://volley-bologna-push.<account>.workers.dev/push?key=$MAINTENANCE_SECRET" -X POST
 ```
 
-C'è **un solo trigger**, ogni 10 minuti; le tre manutenzioni sono distribuite per ora di Roma
-dentro lo stesso giro:
+Il trigger è **uno solo, ogni minuto**: il Worker svuota la coda `pushJobs` e, distribuite per
+ora di Roma dentro lo stesso giro, esegue le manutenzioni:
 
 | Cron (UTC) | Azione |
 | --- | --- |
-| `*/10 * * * *` | offerte riserve scadute → passa alla riserva successiva |
-| `*/10 * * * *`, fascia 03:xx Roma | pulizia messaggi chat più vecchi di 30 giorni |
-| `*/10 * * * *`, fascia 05:xx Roma | pubblicazione dei match ricorrenti della settimana |
+| `* * * * *` | invio delle notifiche push in coda |
+| `* * * * *`, ogni 10 minuti | offerte riserve scadute → passa alla riserva successiva |
+| `* * * * *`, alle 03:00 Roma | pulizia messaggi chat più vecchi di 30 giorni |
+| `* * * * *`, alle 05:00 Roma | pubblicazione dei match ricorrenti della settimana |
 
-Endpoint manuali: `GET /health`, `POST /run?key=…` (tutte le manutenzioni, `force`).
+Come funziona una notifica: il browser registra `public/push-sw.js` e salva la subscription in
+`pushSubscriptions/{uid}` (una mappa `devices`, un dispositivo per voce); l'azione scrive un
+documento in `pushJobs` con `audience` (`all`, `group`, `user`, `match`) e il Worker calcola i
+destinatari, esclude chi ha causato l'evento e invia con VAPID + aes128gcm.
+
+Endpoint manuali: `GET /health`, `POST /push?key=…`, `POST /run?key=…` (tutte le manutenzioni, `force`).
 `GET /` restituisce la descrizione del servizio.
 
 ---
@@ -238,7 +265,7 @@ prima di pubblicare: `npm run build && npx wrangler dev`.
 | Firebase Auth | 50k MAU (Google) | ampiamente sufficiente |
 | Firestore Spark | 50k letture/giorno, 20k scritture/giorno, 1 GiB | chat con paginazione 40 messaggi, listener solo sulle schermate aperte |
 | Cloudflare Workers (asset statici) | richieste incluse nel piano, asset serviti da edge | hosting della SPA |
-| Cloudflare Workers | 100k richieste/giorno | cron ogni 10 min ≈ 4.3k richieste/mese |
+| Cloudflare Workers | 100k richieste/giorno | cron ogni minuto ≈ 43k richieste/mese |
 
 Accorgimenti già applicati: paginazione dei messaggi, listener per-match invece che globali,
 retention 30 giorni sulla chat, nessun upload di immagini (solo testo/emoji), indici compositi

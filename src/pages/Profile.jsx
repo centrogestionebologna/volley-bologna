@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   BadgeCheck,
+  Bell,
+  BellOff,
   Copy,
   Lock,
   LogOut,
@@ -22,6 +24,12 @@ import {
   submitVerification,
 } from '../services/profiles';
 import { listMyRegistrations } from '../services/matches';
+import {
+  disablePush,
+  disablePushQuietly,
+  enablePush,
+  getPushState,
+} from '../services/push';
 import { Avatar, Chip, EmptyState, Field, PageHead, Spinner } from '../components/ui';
 import { useToast } from '../components/Toast';
 import { formatDateShort, formatDateTime, toDate } from '../lib/format';
@@ -37,6 +45,7 @@ export function Profile() {
   const [surname, setSurname] = useState('');
   const [phone, setPhone] = useState('');
   const [busy, setBusy] = useState('');
+  const [pushState, setPushState] = useState('loading');
 
   useEffect(() => {
     setNick(profile?.nickname || nickname);
@@ -56,6 +65,12 @@ export function Profile() {
 
   const myMatches = useAsync(() => listMyRegistrations(uid), [uid]);
   const verification = profile?.verificationStatus || 'none';
+
+  useEffect(() => {
+    getPushState()
+      .then(setPushState)
+      .catch(() => setPushState('unsupported'));
+  }, []);
 
   const savePublic = async () => {
     setBusy('public');
@@ -101,6 +116,29 @@ export function Profile() {
     }
   };
 
+  const togglePush = async () => {
+    setBusy('push');
+    try {
+      if (pushState === 'subscribed') {
+        await disablePush(uid);
+        toast.success('Notifiche disattivate su questo dispositivo.');
+      } else {
+        await enablePush(uid);
+        toast.success('Notifiche attivate su questo dispositivo.');
+      }
+    } catch (error) {
+      toast.error(error.message || 'Impossibile aggiornare le notifiche.');
+    } finally {
+      setPushState(await getPushState().catch(() => 'unsupported'));
+      setBusy('');
+    }
+  };
+
+  const handleSignOut = async () => {
+    await disablePushQuietly(uid);
+    signOut();
+  };
+
   const copyUid = async () => {
     try {
       await navigator.clipboard.writeText(uid);
@@ -120,7 +158,7 @@ export function Profile() {
         title="Profilo"
         sub="Il nickname è pubblico. Nome, cognome, email e telefono restano privati."
         actions={
-          <button type="button" className="btn btn-ghost" onClick={signOut}>
+          <button type="button" className="btn btn-ghost" onClick={handleSignOut}>
             <LogOut size={16} /> Esci
           </button>
         }
@@ -321,6 +359,44 @@ export function Profile() {
                 </button>
               </>
             )}
+          </section>
+
+          <section className="card card-pad">
+            <h2 className="card-title">
+              <Bell size={17} /> Notifiche push
+            </h2>
+            <p className="small muted">
+              Nuovi match, messaggi nelle chat, posto in riserva e richieste nel tuo gruppo.
+            </p>
+            {pushState === 'unsupported' ? (
+              <p className="hint">Questo browser non supporta le notifiche push.</p>
+            ) : pushState === 'unconfigured' ? (
+              <p className="hint">Notifiche non configurate: manca la chiave VAPID nel build.</p>
+            ) : pushState === 'denied' ? (
+              <p className="hint">
+                Permesso bloccato dal browser: riabilitalo dalle impostazioni del sito.
+              </p>
+            ) : (
+              <button
+                type="button"
+                className={`btn ${pushState === 'subscribed' ? 'btn-ghost' : 'btn-primary'} btn-block`}
+                onClick={togglePush}
+                disabled={busy === 'push' || pushState === 'loading'}
+              >
+                {pushState === 'subscribed' ? (
+                  <>
+                    <BellOff size={16} /> Disattiva notifiche
+                  </>
+                ) : (
+                  <>
+                    <Bell size={16} /> Attiva notifiche
+                  </>
+                )}
+              </button>
+            )}
+            {pushState === 'subscribed' ? (
+              <p className="hint">Notifiche attive su questo dispositivo.</p>
+            ) : null}
           </section>
 
           <section className="card card-pad">

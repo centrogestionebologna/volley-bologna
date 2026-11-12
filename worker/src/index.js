@@ -1,4 +1,5 @@
 import { createFirestore, documentName, toFields } from './firestore';
+import { sendWebPush } from './webpush';
 
 const DAY_MS = 86400000;
 const OFFER_MS = 30 * 60000;
@@ -105,6 +106,21 @@ async function expireOne(env, db, match, now) {
   });
 
   await db.commit(writes);
+
+  if (next) {
+    const matchId = match.path.split('/').pop();
+    await enqueuePush(db, {
+      type: 'offer',
+      title: 'Posto disponibile',
+      body: `Hai 30 minuti per confermare il posto su ${fresh.data.title || 'questo match'}.`,
+      url: `/match/${matchId}`,
+      tag: `offerta-${matchId}`,
+      audience: 'user',
+      userId: next.id,
+      matchId,
+    });
+  }
+
   return true;
 }
 
@@ -146,6 +162,143 @@ async function purgeMessages(env, db, now) {
     }
   }
   return deleted;
+}
+
+// ── Notifiche push ─────────────────────────────────────────────────────────
+
+const PUSH_BATCH = 20;
+const PUSH_MAX_SENDS = 80;
+
+function pushJobId() {
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+async function enqueuePush(db, job) {
+  try {
+    await db.create(`pushJobs/${pushJobId()}`, {
+      type: String(job.type || 'system').slice(0, 32),
+      title: String(job.title || 'Volley Bologna Community').slice(0, 120),
+      body: String(job.body || '').slice(0, 240),
+      url: String(job.url || '/').slice(0, 200),
+      tag: String(job.tag || '').slice(0, 32),
+      audience: job.audience || 'all',
+      groupId: job.groupId || null,
+      userId: job.userId || null,
+      matchId: job.matchId || null,
+      actorId: job.actorId || null,
+      createdAt: new Date(),
+    });
+  } catch (error) {
+    console.warn('Notifica non accodata', error.message);
+  }
+}
+
+async function loadSubscriptions(db, uids) {
+  const unique = [...new Set(uids.filter(Boolean))].slice(0, 200);
+  const docs = [];
+  for (let index = 0; index < unique.length; index += 25) {
+    const chunk = unique.slice(index, index + 25);
+    const rows = await Promise.all(chunk.map((uid) => db.getDoc(`pushSubscriptions/${uid}`)));
+    for (const row of rows) {
+      if (row && row.data?.devices && Object.keys(row.data.devices).length) docs.push(row);
+    }
+  }
+  return docs;
+}
+
+async function recipientsFor(db, job) {
+  if (job.audience === 'user') {
+    return loadSubscriptions(db, [job.userId]);
+  }
+  if (job.audience === 'match') {
+    if (!job.matchId) return [];
+    const registrations = await db.query(`matches/${job.matchId}/registrations`, { limit: 200 });
+    return loadSubscriptions(
+      db,
+      registrations
+        .filter((row) => row.data.status === 'confirmed' || row.data.status === 'offered')
+        .map((row) => row.id)
+    );
+  }
+  if (job.audience === 'group') {
+    if (!job.groupId) return [];
+    const members = await db.query(`groups/${job.groupId}/members`, {
+      where: ['status', '==', 'active'],
+      limit: 200,
+    });
+    return loadSubscriptions(db, members.map((row) => row.id));
+  }
+  const rows = await db.query('pushSubscriptions', { limit: 500 });
+  return rows.filter((row) => row.data?.devices && Object.keys(row.data.devices).length);
+}
+
+async function dropDevices(db, dead) {
+  const byUser = new Map();
+  for (const { uid, deviceId } of dead) {
+    if (!byUser.has(uid)) byUser.set(uid, new Set());
+    byUser.get(uid).add(deviceId);
+  }
+  for (const [uid, deviceIds] of byUser) {
+    try {
+      const row = await db.getDoc(`pushSubscriptions/${uid}`);
+      if (!row) continue;
+      const devices = { ...(row.data.devices || {}) };
+      for (const id of deviceIds) delete devices[id];
+      await db.update(`pushSubscriptions/${uid}`, { devices, updatedAt: new Date() }, row.updateTime);
+    } catch (error) {
+      console.warn(`Subscription scadute non rimosse per ${uid}`, error.message);
+    }
+  }
+}
+
+async function dispatchPushQueue(env, db) {
+  if (!env.VAPID_PUBLIC_KEY || !env.VAPID_PRIVATE_KEY) {
+    return { skipped: 'VAPID non configurato' };
+  }
+
+  const jobs = await db.query('pushJobs', { orderBy: [['createdAt', 'asc']], limit: PUSH_BATCH });
+  const summary = { jobs: jobs.length, sent: 0, failed: 0 };
+  const dead = [];
+
+  for (const job of jobs) {
+    if (summary.sent >= PUSH_MAX_SENDS) break;
+    const data = job.data;
+    try {
+      const subscriptions = await recipientsFor(db, data);
+      const message = {
+        title: data.title || 'Volley Bologna Community',
+        body: data.body || '',
+        url: data.url || '/',
+        tag: data.tag || undefined,
+      };
+      for (const row of subscriptions) {
+        if (data.actorId && row.id === data.actorId) continue;
+        for (const [deviceId, device] of Object.entries(row.data.devices || {})) {
+          if (summary.sent >= PUSH_MAX_SENDS) break;
+          if (!device?.endpoint) continue;
+          summary.sent += 1;
+          try {
+            const status = await sendWebPush(env, device, message);
+            if (status === 404 || status === 410) dead.push({ uid: row.id, deviceId });
+          } catch (error) {
+            summary.failed += 1;
+            console.warn(`Push non inviata (${job.id})`, error.message);
+          }
+        }
+      }
+    } catch (error) {
+      summary.failed += 1;
+      console.warn(`Notifica ${job.id} non processata`, error.message);
+    }
+    try {
+      await db.remove(`pushJobs/${job.id}`);
+    } catch (error) {
+      console.warn(`Notifica ${job.id} non rimossa`, error.message);
+    }
+  }
+
+  if (dead.length) await dropDevices(db, dead);
+  return summary;
 }
 
 function recurringOccurs(data, day) {
@@ -244,6 +397,16 @@ async function publishRecurring(env, db, now) {
             createdAt: new Date(now),
             updatedAt: new Date(now),
           });
+          await enqueuePush(db, {
+            type: 'approval',
+            title: 'Riproposta da approvare',
+            body: `${matchData.title} · ${matchData.gym}`,
+            url: '/organizzatore',
+            tag: `riproposta-${docId}`,
+            audience: 'user',
+            userId: data.organizerId,
+            matchId: docId,
+          });
         } catch (error) {
           if (error.status !== 409) {
             console.warn(`Riproposta ${docId} non accodata`, error.message);
@@ -258,6 +421,16 @@ async function publishRecurring(env, db, now) {
       try {
         await db.create(`matches/${docId}`, matchData);
         created += 1;
+        await enqueuePush(db, {
+          type: 'match',
+          title: 'Nuovo match',
+          body: `${matchData.title} · ${matchData.gym}`,
+          url: `/match/${docId}`,
+          tag: `match-${docId}`,
+          audience: matchData.visibility === 'group-private' ? 'group' : 'all',
+          groupId: matchData.groupId,
+          matchId: docId,
+        });
         if (data.organizerId) {
           try {
             await db.create(`matches/${docId}/registrations/${data.organizerId}`, {
@@ -301,23 +474,35 @@ async function runAll(env, { force = false } = {}) {
   const rome = romeParts(new Date(now));
 
   const summary = {
-    offers: await expireOffers(env, db, now),
+    offers: 0,
     messages: 0,
     matches: 0,
+    push: null,
     skipped: [],
   };
 
-  if (force || (rome.hour === 3 && rome.minute < 10)) {
+  // Il cron gira ogni minuto: le offerte scadute si controllano ogni 10 minuti
+  // per non moltiplicare le letture su Firestore.
+  if (force || rome.minute % 10 === 0) {
+    summary.offers = await expireOffers(env, db, now);
+  } else {
+    summary.skipped.push('offerte scadute');
+  }
+
+  if (force || (rome.hour === 3 && rome.minute === 0)) {
     summary.messages = await purgeMessages(env, db, now);
   } else {
     summary.skipped.push('pulizia messaggi');
   }
 
-  if (force || (rome.hour === 5 && rome.minute < 10)) {
+  if (force || (rome.hour === 5 && rome.minute === 0)) {
     summary.matches = await publishRecurring(env, db, now);
   } else {
     summary.skipped.push('pubblicazione ricorrenze');
   }
+
+  // Sempre in coda: le notifiche create qui sopra partono nello stesso giro.
+  summary.push = await dispatchPushQueue(env, db);
 
   return summary;
 }
@@ -338,17 +523,31 @@ export default {
     if (url.pathname === '/health') {
       return Response.json({
         ok: true,
-        service: 'volley-bologna-cron',
+        service: 'volley-bologna-push',
         time: new Date().toISOString(),
       });
     }
 
-    if (url.pathname === '/' ) {
+    if (url.pathname === '/') {
       return Response.json({
-        service: 'Volley Bologna Community — cron worker',
-        endpoints: ['/health', '/run?key=…'],
-        cron: '*/10 * * * *',
+        service: 'Volley Bologna Community — push e manutenzione',
+        endpoints: ['/health', '/push?key=…', '/run?key=…'],
+        cron: '* * * * *',
       });
+    }
+
+    if (url.pathname === '/push') {
+      const key = url.searchParams.get('key') || request.headers.get('x-maintenance-secret');
+      if (!env.MAINTENANCE_SECRET || key !== env.MAINTENANCE_SECRET) {
+        return Response.json({ error: 'Non autorizzato' }, { status: 401 });
+      }
+      try {
+        const db = createFirestore(env);
+        const summary = await dispatchPushQueue(env, db);
+        return Response.json({ ok: true, summary });
+      } catch (error) {
+        return Response.json({ ok: false, error: error.message }, { status: 500 });
+      }
     }
 
     if (url.pathname === '/run') {
