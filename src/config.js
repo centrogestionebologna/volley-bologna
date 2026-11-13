@@ -68,12 +68,21 @@ export const GROUP_SETTING_OPTIONS = {
   ],
 };
 
+// Dati che il fondatore può richiedere a chi chiede di entrare nel gruppo.
+// Restano privati: il gruppo salva solo se sono presenti, non i valori.
+export const PROFILE_REQUIREMENTS = [
+  { value: 'fullName', label: 'Nome e cognome' },
+  { value: 'phone', label: 'Numero di telefono' },
+  { value: 'email', label: 'Email' },
+];
+
 export const DEFAULT_GROUP_SETTINGS = {
   icon: '',
   sendMessagesPolicy: 'all',
   editInfoPolicy: 'all',
   addMembersPolicy: 'all',
   matchOrganizersPolicy: 'all',
+  requiredProfileFields: [],
   approveNewMembers: false,
   disappearingMessages: 'off',
 };
@@ -84,12 +93,17 @@ export function normalizeGroupSettings(source) {
   const disappearing = ['24h', '7d', '90d'].includes(raw.disappearingMessages)
     ? raw.disappearingMessages
     : 'off';
+  const allowedRequirements = new Set(PROFILE_REQUIREMENTS.map((item) => item.value));
+  const requiredProfileFields = Array.isArray(raw.requiredProfileFields)
+    ? [...new Set(raw.requiredProfileFields.filter((value) => allowedRequirements.has(value)))]
+    : [];
   return {
     icon: Array.from(String(raw.icon || '').trim()).slice(0, 4).join(''),
     sendMessagesPolicy: policy(raw.sendMessagesPolicy),
     editInfoPolicy: policy(raw.editInfoPolicy),
     addMembersPolicy: policy(raw.addMembersPolicy),
     matchOrganizersPolicy: policy(raw.matchOrganizersPolicy),
+    requiredProfileFields,
     approveNewMembers: raw.approveNewMembers === true,
     disappearingMessages: disappearing,
   };

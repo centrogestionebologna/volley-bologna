@@ -27,7 +27,7 @@ export function subscribeMyApplication(requestId, uid, callback) {
 }
 
 /**
- * Crea una ricerca giocatori per un match di un gruppo privato.
+ * Crea una ricerca giocatori per un proprio match, da qualsiasi gruppo.
  * Il messaggio in #generale contiene solo i dati del match e i ruoli mancanti:
  * nome del gruppo, organizzatore e link al match restano fuori dalla chat.
  */
@@ -39,11 +39,11 @@ export async function createPlayerRequest({
   slotsNeeded = 1,
   note = '',
 }) {
-  if (!group?.id || group.visibility !== 'private') {
-    throw new Error('La ricerca giocatori è disponibile solo per i gruppi privati.');
-  }
-  if (group.ownerId !== organizer?.uid) {
-    throw new Error('Solo il fondatore del gruppo può pubblicare una ricerca.');
+  if (!group?.id) throw new Error('La ricerca giocatori deve partire da un gruppo.');
+  if (!organizer?.uid) throw new Error('Sessione non valida.');
+  const membership = await store.getDoc(`groups/${group.id}/members/${organizer.uid}`);
+  if (membership?.data?.status !== 'active' || membership?.data?.role === 'guest') {
+    throw new Error('Solo i membri attivi del gruppo possono pubblicare una ricerca.');
   }
   if (!match?.id) throw new Error('Scegli il match per cui cerchi giocatori.');
   if (match.organizerId && match.organizerId !== organizer.uid) {

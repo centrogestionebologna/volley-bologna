@@ -558,13 +558,11 @@ service cloud.firestore {
             && request.resource.data.status == 'active'
             && request.resource.data.inviteHash == null
           )
-          // Ospite temporaneo: il fondatore aggiunge alla chat un giocatore
-          // approvato per una ricerca giocatori di un match del gruppo.
-          // L'accesso scade da solo (guestUntil) e non dà diritto a descrizione
-          // né codice invito.
+          // Ospite temporaneo: chi ha pubblicato la ricerca aggiunge alla chat
+          // un giocatore approvato per un match del gruppo. L'accesso scade da
+          // solo (guestUntil) e non dà diritto a descrizione né codice invito.
           || (
-            isGroupOwner(groupId)
-            && memberId != uid()
+            memberId != uid()
             && request.resource.data.uid == memberId
             && request.resource.data.role == 'guest'
             && request.resource.data.status == 'active'
@@ -700,12 +698,12 @@ service cloud.firestore {
         || isPlayerRequestOrganizer(requestId)
         || isApprovedApplicant(requestId);
       allow list: if false;
+      // Ricerca giocatori: può pubblicarla qualsiasi membro attivo del gruppo
+      // per un match che organizza (non solo il fondatore dei gruppi privati).
       allow create: if canWrite()
         && request.resource.data.organizerId == uid()
         && groupExists(request.resource.data.groupId)
-        && isGroupOwner(request.resource.data.groupId)
-        && groupData(request.resource.data.groupId).visibility == 'private'
-        && matchExists(request.resource.data.matchId)
+        && isActiveMember(request.resource.data.groupId)
         && matchData(request.resource.data.matchId).organizerId == uid()
         && request.resource.data.status == 'open';
       allow update: if isAdmin() || isPlayerRequestOrganizer(requestId);

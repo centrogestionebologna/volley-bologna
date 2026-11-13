@@ -156,13 +156,13 @@ export async function postMatchProposalToGroup({ groupId, organizer, matchId, ma
   });
 }
 
-/** Pubblica una ricerca giocatori senza esporre il nome del gruppo privato. */
+/** Pubblica una ricerca giocatori senza esporre il nome del gruppo né chi la lancia. */
 export async function postPlayerRequestProposal({ organizer, requestId, request }) {
   if (!organizer?.uid || !requestId) throw new Error('Dati della ricerca non validi.');
   return store.addDoc(generalChatPath, {
     authorId: organizer.uid,
-    authorNickname: 'Gruppo privato',
-    text: 'Ricerca giocatori da gruppo privato',
+    authorNickname: 'Ricerca giocatori',
+    text: 'Ricerca giocatori nella community',
     createdAt: serverTimestamp(),
     editedAt: null,
     deleted: false,

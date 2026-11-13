@@ -27,6 +27,7 @@ import { useAuth } from '../auth/AuthProvider';
 import { store } from '../backend';
 import {
   GROUP_SETTING_OPTIONS,
+  PROFILE_REQUIREMENTS,
   VOLLEY_ROLES,
   labelOf,
   normalizeGroupSettings,
@@ -40,6 +41,8 @@ import {
   getGroupSecret,
   joinGroup,
   leaveGroup,
+  loadProfileChecks,
+  missingProfileLabels,
   regenerateInvite,
   rejectMember,
   setGroupBan,
@@ -138,6 +141,12 @@ function PollCard({ groupId, poll, uid, canManage, busy, onVote, onClose, onDele
   );
 }
 
+function profileSummary(required = [], checks = null) {
+  if (!checks) return '';
+  const missing = missingProfileLabels(required, checks);
+  return missing.length ? ` · manca: ${missing.join(', ').toLowerCase()}` : ' · profilo completo';
+}
+
 function selectedLabelSuffix(vote, options) {
   if (!vote) return '';
   const index = Number(vote.optionIndex);
@@ -189,9 +198,7 @@ export function GroupDetail() {
       !isGuest &&
       (groupSettings.matchOrganizersPolicy !== 'admins' || isOwner || isAdmin)
   );
-  const canSearchPlayers = Boolean(
-    isOwner && group.visibility === 'private' && !isGuest
-  );
+  const canSearchPlayers = Boolean(isMember && !isGuest);
 
   const [busy, setBusy] = useState('');
   const [inviteBusy, setInviteBusy] = useState(() => Boolean(searchParams.get('invite')));
@@ -227,14 +234,14 @@ export function GroupDetail() {
 
   const myMatchesState = useSubscription(
     (cb) =>
-      isOwner && group?.visibility === 'private'
+      isMember && !isGuest && uid
         ? store.subscribeList(
             'matches',
             { where: [['organizerId', '==', uid]], limit: 50 },
             cb
           )
         : () => {},
-    [isOwner, uid, group?.visibility]
+    [isMember, isGuest, uid]
   );
   const pollsState = useSubscription(
     (cb) => (pollsOpen ? subscribePolls(groupId, cb) : () => {}),
@@ -254,6 +261,15 @@ export function GroupDetail() {
       );
     })
     .sort((a, b) => (toDate(a.startsAt)?.getTime() || 0) - (toDate(b.startsAt)?.getTime() || 0));
+
+  const profileChecksState = useAsync(
+    () => (uid ? loadProfileChecks(uid) : Promise.resolve(null)),
+    [uid]
+  );
+  const missingRequirements = missingProfileLabels(
+    groupSettings.requiredProfileFields,
+    profileChecksState.data || {}
+  );
 
   const secret = useAsync(
     () => (canReadInvite ? getGroupSecret(groupId) : Promise.resolve(null)),
@@ -318,6 +334,12 @@ export function GroupDetail() {
   }, [group, isMember, isBannedHere, groupId, navigate, searchParams, toast, uid, nickname]);
 
   const join = async () => {
+    if (missingRequirements.length) {
+      toast.error(
+        `Completa prima il profilo: manca ${missingRequirements.join(', ').toLowerCase()}.`
+      );
+      return;
+    }
     setBusy('join');
     try {
       const status = await joinGroup({ groupId, user: { uid, nickname } });
@@ -642,6 +664,183 @@ export function GroupDetail() {
     !isSilenced &&
     (groupSettings.sendMessagesPolicy === 'all' || isOwner || isAdmin);
 
+  // Questi pannelli servono anche dentro la chat (menu del "+"), che ha un
+  // return anticipato: vanno definiti prima, altrimenti non si aprono.
+  const overlays = (
+    <>
+      <Modal
+        open={playerRequestOpen}
+        onClose={() => setPlayerRequestOpen(false)}
+        title="Cerca giocatori"
+        subtitle="La chat generale mostrerà “Ricerca giocatori da gruppo privato”: nome del gruppo e link al match restano riservati."
+        footer={
+          <>
+            <button type="button" className="btn btn-ghost" onClick={() => setPlayerRequestOpen(false)}>
+              Annulla
+            </button>
+            <button
+              type="submit"
+              form="player-request-form"
+              className="btn btn-primary"
+              disabled={requestBusy || !playerRequestForm.matchId}
+            >
+              <UserPlus size={16} /> {requestBusy ? 'Pubblicazione…' : 'Pubblica ricerca'}
+            </button>
+          </>
+        }
+      >
+        <form id="player-request-form" className="form" onSubmit={submitPlayerRequest}>
+          <Field label="Match per cui cerchi giocatori *">
+            <select
+              className="select"
+              value={playerRequestForm.matchId}
+              onChange={(event) =>
+                setPlayerRequestForm((prev) => ({ ...prev, matchId: event.target.value }))
+              }
+              required
+            >
+              <option value="">Scegli un match…</option>
+              {availableMatches.map((match) => (
+                <option key={match.id} value={match.id}>
+                  {formatDateShort(match.startsAt)} · {match.time} · {match.gym}
+                </option>
+              ))}
+            </select>
+          </Field>
+          {availableMatches.length === 0 ? (
+            <p className="hint">
+              Non hai match aperti con posti liberi. <Link to="/match/nuovo">Organizza un match</Link>.
+            </p>
+          ) : null}
+
+          <div className="form-row">
+            <Field label="Giocatori mancanti">
+              <input
+                className="input"
+                type="number"
+                min="1"
+                max="8"
+                value={playerRequestForm.slotsNeeded}
+                onChange={(event) =>
+                  setPlayerRequestForm((prev) => ({ ...prev, slotsNeeded: event.target.value }))
+                }
+              />
+            </Field>
+            <div className="field">
+              <span className="field-label">Ruoli cercati</span>
+              <div className="role-checks">
+                {VOLLEY_ROLES.map((role) => (
+                  <label key={role.value} className="check">
+                    <input
+                      type="checkbox"
+                      checked={playerRequestForm.neededRoles.includes(role.value)}
+                      onChange={() => toggleNeededRole(role.value)}
+                    />
+                    <span>{role.label}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <Field
+            label="Nota pubblica"
+            hint="Massimo 400 caratteri. Non inserire nome del gruppo, contatti o dati personali."
+          >
+            <textarea
+              className="textarea"
+              rows={3}
+              maxLength={400}
+              value={playerRequestForm.note}
+              onChange={(event) =>
+                setPlayerRequestForm((prev) => ({ ...prev, note: event.target.value }))
+              }
+              placeholder="Es. cerchiamo un centrale per una partita amichevole, livello intermedio…"
+            />
+          </Field>
+        </form>
+      </Modal>
+      <Modal
+        open={pollsOpen}
+        onClose={() => setPollsOpen(false)}
+        title="Sondaggi del gruppo"
+        subtitle="Un voto per persona: puoi cambiare scelta finché il sondaggio è aperto."
+        footer={
+          <button type="button" className="btn btn-ghost" onClick={() => setPollsOpen(false)}>
+            Chiudi
+          </button>
+        }
+      >
+        <form className="form poll-create" onSubmit={submitPoll}>
+          <Field label="Nuovo sondaggio" hint="La domanda e le opzioni sono visibili a tutti i membri.">
+            <input
+              className="input"
+              value={pollForm.question}
+              onChange={(event) =>
+                setPollForm((prev) => ({ ...prev, question: event.target.value }))
+              }
+              placeholder="Es. a che ora giochiamo mercoledì?"
+              maxLength={200}
+            />
+          </Field>
+          {pollForm.options.map((option, index) => (
+            <input
+              key={`poll-option-${index}`}
+              className="input"
+              value={option}
+              onChange={(event) =>
+                setPollForm((prev) => ({
+                  ...prev,
+                  options: prev.options.map((item, i) =>
+                    i === index ? event.target.value : item
+                  ),
+                }))
+              }
+              placeholder={`Opzione ${index + 1}`}
+              maxLength={80}
+            />
+          ))}
+          <div className="row-actions">
+            {pollForm.options.length < 8 ? (
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() =>
+                  setPollForm((prev) => ({ ...prev, options: [...prev.options, ''] }))
+                }
+              >
+                <Plus size={14} /> Aggiungi opzione
+              </button>
+            ) : null}
+            <button type="submit" className="btn btn-primary btn-sm" disabled={pollBusy === 'create'}>
+              {pollBusy === 'create' ? 'Pubblicazione…' : 'Pubblica sondaggio'}
+            </button>
+          </div>
+        </form>
+
+        <div className="poll-list">
+          {polls.length === 0 ? (
+            <p className="muted small">Nessun sondaggio ancora: creane uno qui sopra.</p>
+          ) : (
+            polls.map((poll) => (
+              <PollCard
+                key={poll.id}
+                groupId={groupId}
+                poll={poll}
+                uid={uid}
+                canManage={poll.createdBy === uid || isOwner || isAdmin}
+                busy={pollBusy}
+                onVote={vote}
+                onClose={closePollAction}
+                onDelete={removePoll}
+              />
+            ))
+          )}
+        </div>
+      </Modal>
+    </>
+  );
+
   if (chatOpen) {
     return (
       <div className="page chat-page chat-page--full">
@@ -763,6 +962,7 @@ export function GroupDetail() {
             </button>
           </div>
         ) : null}
+        {overlays}
       </div>
     );
   }
@@ -883,6 +1083,16 @@ export function GroupDetail() {
               </strong>
             </div>
             <div className="group-setting">
+              <span>Requisiti per entrare</span>
+              <strong>
+                {groupSettings.requiredProfileFields.length
+                  ? groupSettings.requiredProfileFields
+                      .map((value) => labelOf(PROFILE_REQUIREMENTS, value))
+                      .join(', ')
+                  : 'Nessuno'}
+              </strong>
+            </div>
+            <div className="group-setting">
               <span>Approvazione nuovi membri</span>
               <strong>
                 {group.visibility === 'private'
@@ -942,12 +1152,22 @@ export function GroupDetail() {
                 Il gruppo è pubblico: puoi entrare subito e leggere la chat. La conversazione
                 comparirà solo dopo l’ingresso.
               </p>
+              {groupSettings.requiredProfileFields.length ? (
+                <p className={missingRequirements.length ? 'hint danger-text' : 'hint'}>
+                  {missingRequirements.length
+                    ? `Per entrare serve: ${missingRequirements.join(', ').toLowerCase()}. `
+                    : 'Requisiti del profilo soddisfatti. '}
+                  {missingRequirements.length ? (
+                    <Link to="/profilo">Completa il profilo</Link>
+                  ) : null}
+                </p>
+              ) : null}
               <div className="join-actions">
                 <button
                   type="button"
                   className="btn btn-whatsapp"
                   onClick={join}
-                  disabled={busy === 'join'}
+                  disabled={busy === 'join' || missingRequirements.length > 0}
                 >
                   <MessageCircle size={18} /> Entra nel gruppo
                 </button>
@@ -1007,7 +1227,10 @@ export function GroupDetail() {
                       <Avatar name={member.nickname} size="sm" />
                       <div>
                         <strong>{member.nickname}</strong>
-                        <small>In attesa dal {formatDateShort(member.joinedAt)}</small>
+                        <small>
+                          In attesa dal {formatDateShort(member.joinedAt)}
+                          {profileSummary(groupSettings.requiredProfileFields, member.profileChecks)}
+                        </small>
                       </div>
                       <div className="row-actions">
                         <button
@@ -1062,7 +1285,7 @@ export function GroupDetail() {
           </section>
 
           <aside className="detail-side">
-            {isOwner && group.visibility === 'private' ? (
+            {isMember && !isGuest ? (
               <section className="card card-pad player-search-card">
                 <h2 className="card-title">
                   <UserPlus size={17} /> Cerca giocatori
@@ -1166,98 +1389,6 @@ export function GroupDetail() {
         <p className="muted">Se vuoi solo chiudere le iscrizioni, non è necessario eliminarlo.</p>
       </Modal>
 
-      <Modal
-        open={playerRequestOpen}
-        onClose={() => setPlayerRequestOpen(false)}
-        title="Cerca giocatori"
-        subtitle="La chat generale mostrerà “Ricerca giocatori da gruppo privato”: nome del gruppo e link al match restano riservati."
-        footer={
-          <>
-            <button type="button" className="btn btn-ghost" onClick={() => setPlayerRequestOpen(false)}>
-              Annulla
-            </button>
-            <button
-              type="submit"
-              form="player-request-form"
-              className="btn btn-primary"
-              disabled={requestBusy || !playerRequestForm.matchId}
-            >
-              <UserPlus size={16} /> {requestBusy ? 'Pubblicazione…' : 'Pubblica ricerca'}
-            </button>
-          </>
-        }
-      >
-        <form id="player-request-form" className="form" onSubmit={submitPlayerRequest}>
-          <Field label="Match per cui cerchi giocatori *">
-            <select
-              className="select"
-              value={playerRequestForm.matchId}
-              onChange={(event) =>
-                setPlayerRequestForm((prev) => ({ ...prev, matchId: event.target.value }))
-              }
-              required
-            >
-              <option value="">Scegli un match…</option>
-              {availableMatches.map((match) => (
-                <option key={match.id} value={match.id}>
-                  {formatDateShort(match.startsAt)} · {match.time} · {match.gym}
-                </option>
-              ))}
-            </select>
-          </Field>
-          {availableMatches.length === 0 ? (
-            <p className="hint">
-              Non hai match aperti con posti liberi. <Link to="/match/nuovo">Organizza un match</Link>.
-            </p>
-          ) : null}
-
-          <div className="form-row">
-            <Field label="Giocatori mancanti">
-              <input
-                className="input"
-                type="number"
-                min="1"
-                max="8"
-                value={playerRequestForm.slotsNeeded}
-                onChange={(event) =>
-                  setPlayerRequestForm((prev) => ({ ...prev, slotsNeeded: event.target.value }))
-                }
-              />
-            </Field>
-            <div className="field">
-              <span className="field-label">Ruoli cercati</span>
-              <div className="role-checks">
-                {VOLLEY_ROLES.map((role) => (
-                  <label key={role.value} className="check">
-                    <input
-                      type="checkbox"
-                      checked={playerRequestForm.neededRoles.includes(role.value)}
-                      onChange={() => toggleNeededRole(role.value)}
-                    />
-                    <span>{role.label}</span>
-                  </label>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          <Field
-            label="Nota pubblica"
-            hint="Massimo 400 caratteri. Non inserire nome del gruppo, contatti o dati personali."
-          >
-            <textarea
-              className="textarea"
-              rows={3}
-              maxLength={400}
-              value={playerRequestForm.note}
-              onChange={(event) =>
-                setPlayerRequestForm((prev) => ({ ...prev, note: event.target.value }))
-              }
-              placeholder="Es. cerchiamo un centrale per una partita amichevole, livello intermedio…"
-            />
-          </Field>
-        </form>
-      </Modal>
 
       <Modal
         open={settingsOpen}
@@ -1431,6 +1562,35 @@ export function GroupDetail() {
                     ))}
                   </select>
                 </Field>
+
+                <div className="field">
+                  <span className="field-label">Requisiti per entrare</span>
+                  <div className="role-checks">
+                    {PROFILE_REQUIREMENTS.map((requirement) => (
+                      <label key={requirement.value} className="check">
+                        <input
+                          type="checkbox"
+                          checked={settingsForm.requiredProfileFields.includes(requirement.value)}
+                          onChange={(event) =>
+                            setSettingsForm((prev) => ({
+                              ...prev,
+                              requiredProfileFields: event.target.checked
+                                ? [...new Set([...prev.requiredProfileFields, requirement.value])]
+                                : prev.requiredProfileFields.filter(
+                                    (value) => value !== requirement.value
+                                  ),
+                            }))
+                          }
+                        />
+                        <span>{requirement.label}</span>
+                      </label>
+                    ))}
+                  </div>
+                  <span className="field-hint">
+                    Chi non ha questi dati non può chiedere di entrare. Il gruppo vede solo se ci
+                    sono, non i valori.
+                  </span>
+                </div>
               </>
             ) : (
               <p className="hint">
@@ -1442,84 +1602,8 @@ export function GroupDetail() {
         ) : null}
       </Modal>
 
-      <Modal
-        open={pollsOpen}
-        onClose={() => setPollsOpen(false)}
-        title="Sondaggi del gruppo"
-        subtitle="Un voto per persona: puoi cambiare scelta finché il sondaggio è aperto."
-        footer={
-          <button type="button" className="btn btn-ghost" onClick={() => setPollsOpen(false)}>
-            Chiudi
-          </button>
-        }
-      >
-        <form className="form poll-create" onSubmit={submitPoll}>
-          <Field label="Nuovo sondaggio" hint="La domanda e le opzioni sono visibili a tutti i membri.">
-            <input
-              className="input"
-              value={pollForm.question}
-              onChange={(event) =>
-                setPollForm((prev) => ({ ...prev, question: event.target.value }))
-              }
-              placeholder="Es. a che ora giochiamo mercoledì?"
-              maxLength={200}
-            />
-          </Field>
-          {pollForm.options.map((option, index) => (
-            <input
-              key={`poll-option-${index}`}
-              className="input"
-              value={option}
-              onChange={(event) =>
-                setPollForm((prev) => ({
-                  ...prev,
-                  options: prev.options.map((item, i) =>
-                    i === index ? event.target.value : item
-                  ),
-                }))
-              }
-              placeholder={`Opzione ${index + 1}`}
-              maxLength={80}
-            />
-          ))}
-          <div className="row-actions">
-            {pollForm.options.length < 8 ? (
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm"
-                onClick={() =>
-                  setPollForm((prev) => ({ ...prev, options: [...prev.options, ''] }))
-                }
-              >
-                <Plus size={14} /> Aggiungi opzione
-              </button>
-            ) : null}
-            <button type="submit" className="btn btn-primary btn-sm" disabled={pollBusy === 'create'}>
-              {pollBusy === 'create' ? 'Pubblicazione…' : 'Pubblica sondaggio'}
-            </button>
-          </div>
-        </form>
 
-        <div className="poll-list">
-          {polls.length === 0 ? (
-            <p className="muted small">Nessun sondaggio ancora: creane uno qui sopra.</p>
-          ) : (
-            polls.map((poll) => (
-              <PollCard
-                key={poll.id}
-                groupId={groupId}
-                poll={poll}
-                uid={uid}
-                canManage={poll.createdBy === uid || isOwner || isAdmin}
-                busy={pollBusy}
-                onVote={vote}
-                onClose={closePollAction}
-                onDelete={removePoll}
-              />
-            ))
-          )}
-        </div>
-      </Modal>
+      {overlays}
     </div>
   );
 }

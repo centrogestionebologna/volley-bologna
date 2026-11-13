@@ -1,5 +1,9 @@
 import { store } from '../backend';
-import { DEFAULT_GROUP_SETTINGS, normalizeGroupSettings } from '../config';
+import {
+  DEFAULT_GROUP_SETTINGS,
+  PROFILE_REQUIREMENTS,
+  normalizeGroupSettings,
+} from '../config';
 import { serverTimestamp } from '../store/base';
 import { sha256Hex, generateInviteCode, normalizeInviteCode } from '../lib/crypto';
 import { queuePush } from './push';
@@ -32,6 +36,27 @@ export function subscribeMembership(groupId, uid, callback) {
 
 export async function getMembership(groupId, uid) {
   return store.getDoc(memberPath(groupId, uid));
+}
+
+/**
+ * Requisiti del profilo: legge solo il proprio documento privato e restituisce
+ * sì/no per ogni dato, mai i valori. Il gruppo memorizza solo questi flag.
+ */
+export async function loadProfileChecks(uid) {
+  if (!uid) return {};
+  const doc = await store.getDoc(`users/${uid}`).catch(() => null);
+  const data = doc?.data || {};
+  return {
+    fullName: Boolean(String(data.realName || '').trim() && String(data.surname || '').trim()),
+    phone: Boolean(String(data.phone || '').trim()),
+    email: Boolean(String(data.email || '').trim()),
+  };
+}
+
+export function missingProfileLabels(required = [], checks = {}) {
+  return PROFILE_REQUIREMENTS.filter(
+    (item) => required.includes(item.value) && !checks[item.value]
+  ).map((item) => item.label);
 }
 
 export async function createGroup({ name, description = '', visibility, owner, actorIsAdmin = false }) {
@@ -136,6 +161,30 @@ export async function joinGroup({ groupId, user, inviteCode = '' }) {
       ? { ownerId: group.ownerId, groupName: group.name || 'Gruppo' }
       : null;
 
+    // Il fondatore può chiedere che il profilo abbia nome e cognome, telefono
+    // ed email prima di entrare. Il controllo è sul profilo di chi si iscrive.
+    const required = Array.isArray(group.requiredProfileFields)
+      ? group.requiredProfileFields
+      : [];
+    let profileChecks = null;
+    if (required.length) {
+      const userDoc = await tx.get(`users/${user.uid}`);
+      const profile = userDoc?.data || {};
+      profileChecks = {
+        fullName: Boolean(
+          String(profile.realName || '').trim() && String(profile.surname || '').trim()
+        ),
+        phone: Boolean(String(profile.phone || '').trim()),
+        email: Boolean(String(profile.email || '').trim()),
+      };
+      const missing = missingProfileLabels(required, profileChecks);
+      if (missing.length) {
+        throw new Error(
+          `Per entrare in questo gruppo il profilo deve avere: ${missing.join(', ')}. Completa il profilo e riprova.`
+        );
+      }
+    }
+
     tx.set(memberPath(groupId, user.uid), {
       uid: user.uid,
       nickname: user.nickname,
@@ -143,6 +192,7 @@ export async function joinGroup({ groupId, user, inviteCode = '' }) {
       status,
       joinedAt: existing?.data?.joinedAt || serverTimestamp(),
       inviteHash,
+      ...(profileChecks ? { profileChecks } : {}),
     });
 
     if (status === 'active') {
@@ -319,6 +369,7 @@ export async function updateGroupDetails({
       editInfoPolicy: merged.editInfoPolicy,
       addMembersPolicy: merged.addMembersPolicy,
       matchOrganizersPolicy: merged.matchOrganizersPolicy,
+      requiredProfileFields: merged.requiredProfileFields,
       approveNewMembers: merged.approveNewMembers,
       disappearingMessages: merged.disappearingMessages,
     });
