@@ -5645,8 +5645,8 @@ html.chat-mode-active body {
 
 .chat-actions {
   position: fixed;
-  right: 14px;
-  bottom: calc(118px + env(safe-area-inset-bottom));
+  right: 8px;
+  bottom: calc(111px + env(safe-area-inset-bottom));
   z-index: 31;
   display: flex;
   flex-direction: column;
@@ -5657,8 +5657,14 @@ html.chat-mode-active body {
 @media (min-width: 981px) {
   .chat-actions {
     bottom: 24px;
-    right: 24px;
+    right: 20px;
   }
+}
+
+/* Mentre il menu del "+" è aperto il selettore gruppi sparisce, così i due
+   pannelli non si sovrappongono nella stessa zona dello schermo. */
+.group-actions-open .quick-groups {
+  display: none;
 }
 
 .chat-actions-backdrop {
@@ -5674,20 +5680,30 @@ html.chat-mode-active body {
 .chat-actions-toggle {
   position: relative;
   z-index: 2;
-  width: 48px;
-  height: 48px;
+  width: 42px;
+  height: 42px;
   display: grid;
   place-items: center;
-  border: 0;
-  border-radius: 50%;
-  background: var(--blue);
-  color: #fff;
-  box-shadow: 0 10px 24px rgba(37, 99, 235, 0.35);
+  padding: 0;
+  border: 1px solid #c9d9f5;
+  border-radius: 14px;
+  background: var(--blue-soft);
+  color: var(--blue);
+  box-shadow: 0 4px 16px -10px rgba(15, 30, 50, 0.3);
   cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.chat-actions-toggle:hover,
+.chat-actions-toggle:focus-visible {
+  border-color: var(--blue);
+  background: #dbe7fb;
 }
 
 .chat-actions-toggle.active {
-  background: #0f172a;
+  border-color: var(--blue);
+  background: var(--blue);
+  color: #fff;
 }
 
 .chat-actions-menu {

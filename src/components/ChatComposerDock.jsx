@@ -6,10 +6,22 @@ export function ChatComposerDockProvider({ children }) {
   const [slot, setSlot] = useState(null);
   const [active, setActive] = useState(false);
   const [wheelRequest, setWheelRequest] = useState(0);
+  // Il selettore gruppi e il menu azioni del gruppo condividono lo stato per
+  // non aprirsi uno sopra l'altro.
+  const [wheelOpen, setWheelOpen] = useState(false);
   const requestGroupWheel = useCallback(() => setWheelRequest((value) => value + 1), []);
   const value = useMemo(
-    () => ({ slot, setSlot, active, setActive, wheelRequest, requestGroupWheel }),
-    [slot, active, wheelRequest, requestGroupWheel]
+    () => ({
+      slot,
+      setSlot,
+      active,
+      setActive,
+      wheelRequest,
+      requestGroupWheel,
+      wheelOpen,
+      setWheelOpen,
+    }),
+    [slot, active, wheelRequest, requestGroupWheel, wheelOpen]
   );
 
   return (

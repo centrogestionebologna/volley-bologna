@@ -61,6 +61,7 @@ import {
 import { createPlayerRequest } from '../services/playerRequests';
 import { Avatar, Chip, EmptyState, Field, Modal, Spinner } from '../components/ui';
 import { ChatRoom } from '../components/ChatRoom';
+import { useChatComposerDock } from '../components/ChatComposerDock';
 import { PrivateGroupGate } from '../components/PrivateGroupGate';
 import { useToast } from '../components/Toast';
 import { formatDateShort, toDate } from '../lib/format';
@@ -149,6 +150,7 @@ export function GroupDetail() {
   const navigate = useNavigate();
   const toast = useToast();
   const { uid, nickname, isAdmin, isBanned, isSilenced, profile } = useAuth();
+  const { wheelOpen, setWheelOpen } = useChatComposerDock();
 
   const groupState = useSubscription((cb) => subscribeGroup(groupId, cb), [groupId]);
   const membershipState = useSubscription((cb) => subscribeMembership(groupId, uid, cb), [groupId, uid]);
@@ -211,6 +213,17 @@ export function GroupDetail() {
   const [pollBusy, setPollBusy] = useState('');
   const [pollForm, setPollForm] = useState({ question: '', options: ['', ''] });
   const attemptedInvite = useRef(false);
+
+  // Selettore gruppi e menu del "+" non devono mai sovrapporsi.
+  useEffect(() => {
+    if (wheelOpen) setActionsOpen(false);
+  }, [wheelOpen]);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    root.classList.toggle('group-actions-open', actionsOpen);
+    return () => root.classList.remove('group-actions-open');
+  }, [actionsOpen]);
 
   const myMatchesState = useSubscription(
     (cb) =>
@@ -670,7 +683,7 @@ export function GroupDetail() {
           />
         </section>
 
-        {isMember && !isGuest && !isBannedHere ? (
+        {isMember && !isGuest && !isBannedHere && !wheelOpen ? (
           <div className={`chat-actions ${actionsOpen ? 'open' : ''}`}>
             {actionsOpen ? (
               <>
@@ -738,7 +751,10 @@ export function GroupDetail() {
             <button
               type="button"
               className={`chat-actions-toggle ${actionsOpen ? 'active' : ''}`}
-              onClick={() => setActionsOpen((open) => !open)}
+              onClick={() => {
+                setWheelOpen(false);
+                setActionsOpen((open) => !open);
+              }}
               aria-label="Azioni del gruppo"
               aria-expanded={actionsOpen}
               title="Azioni del gruppo"

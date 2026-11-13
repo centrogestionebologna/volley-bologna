@@ -11,11 +11,16 @@ export function QuickComposer() {
   const { uid } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
-  const { active: composerActive, setSlot: setComposerSlot, wheelRequest } = useChatComposerDock();
+  const {
+    active: composerActive,
+    setSlot: setComposerSlot,
+    wheelRequest,
+    wheelOpen,
+    setWheelOpen,
+  } = useChatComposerDock();
   const routeGroupId = location.pathname.match(/^\/gruppi\/([^/]+)$/)?.[1] || '';
   const [target, setTarget] = useState(routeGroupId || 'general');
   const [targets, setTargets] = useState([]);
-  const [wheelOpen, setWheelOpen] = useState(false);
   const dockRef = useRef(null);
   const navigateTimer = useRef(null);
 
