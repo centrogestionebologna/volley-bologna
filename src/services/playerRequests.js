@@ -180,7 +180,8 @@ export async function approveApplication({ requestId, applicantUid, reviewerUid 
       guestRequestId: requestId,
       guestMatchId: request.matchId,
       guestUntil,
-      joinedAt: membership?.data?.joinedAt || serverTimestamp(),
+      // L'ospite vede la chat da questo momento: non i messaggi precedenti.
+      joinedAt: serverTimestamp(),
     });
 
     // L'ospite conta come membro attivo (prima non lo era: era esterno o in attesa).

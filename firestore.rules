@@ -39,8 +39,21 @@ service cloud.firestore {
         && userData(uid()).silencedUntil > request.time;
     }
 
+    // Una sola lettura del profilo per controllo: ogni get()/exists() conta
+    // verso il limite di accessi per richiesta (10/20) e le regole dei match
+    // chiamano spesso canWrite().
     function canWrite() {
-      return signedIn() && !isBanned() && !isSilenced();
+      return signedIn()
+        && !(
+          exists(/databases/$(database)/documents/users/$(uid()))
+          && (
+            userData(uid()).banned == true
+            || (
+              userData(uid()).silencedUntil != null
+              && userData(uid()).silencedUntil > request.time
+            )
+          )
+        );
     }
 
     function matchExists(id) {
@@ -52,7 +65,7 @@ service cloud.firestore {
     }
 
     function isMatchOrganizer(id) {
-      return signedIn() && matchExists(id) && matchData(id).organizerId == uid();
+      return signedIn() && matchData(id).organizerId == uid();
     }
 
 
@@ -82,12 +95,12 @@ service cloud.firestore {
       return signedIn() && groupExists(id) && groupData(id).ownerId == uid();
     }
 
+    // Due sole letture (match + gruppo): il fondatore del gruppo deve poter
+    // gestire e rimuovere le iscrizioni restando dentro il limite di accessi.
     function isMatchGroupOwner(id) {
       return signedIn()
-        && matchExists(id)
         && matchData(id).keys().hasAll(['groupId'])
         && matchData(id).groupId is string
-        && groupExists(matchData(id).groupId)
         && groupData(matchData(id).groupId).ownerId == uid();
     }
 
@@ -407,6 +420,46 @@ service cloud.firestore {
           ])
         );
       allow delete: if isAdmin() || isGroupOwner(groupId);
+    }
+
+    // Sondaggi di gruppo: una scheda per sondaggio e un voto per persona,
+    // così i conteggi non richiedono transazioni sul documento del sondaggio.
+    match /groups/{groupId}/polls/{pollId} {
+      allow read: if signedIn() && isActiveMember(groupId);
+      allow create: if canWrite()
+        && isActiveMember(groupId)
+        && request.resource.data.createdBy == uid()
+        && request.resource.data.status == 'open'
+        && request.resource.data.question is string
+        && request.resource.data.question.size() >= 3
+        && request.resource.data.question.size() <= 200
+        && request.resource.data.options is list
+        && request.resource.data.options.size() >= 2
+        && request.resource.data.options.size() <= 8;
+      allow update: if canWrite()
+        && isActiveMember(groupId)
+        && (
+          resource.data.createdBy == uid()
+          || isGroupOwner(groupId)
+          || isAdmin()
+        )
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'status', 'closedAt', 'updatedAt'
+        ]);
+      allow delete: if isAdmin()
+        || isGroupOwner(groupId)
+        || (signedIn() && resource.data.createdBy == uid());
+
+      match /votes/{voterId} {
+        allow read: if signedIn() && isActiveMember(groupId);
+        allow create, update: if canWrite()
+          && isActiveMember(groupId)
+          && voterId == uid()
+          && request.resource.data.uid == uid()
+          && request.resource.data.optionIndex is int
+          && request.resource.data.optionIndex >= 0;
+        allow delete: if isAdmin() || voterId == uid();
+      }
     }
 
     match /groupSecrets/{groupId} {

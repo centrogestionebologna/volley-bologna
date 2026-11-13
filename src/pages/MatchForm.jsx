@@ -122,6 +122,7 @@ export function MatchForm() {
           recurring,
           recurrence: { frequency: recurrenceFrequency, approvalMode: recurrenceApproval },
           group: targetGroup,
+          actorIsAdmin: isAdmin,
         });
         if (targetGroup) {
           toast.success(

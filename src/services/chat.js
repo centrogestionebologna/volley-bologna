@@ -8,10 +8,19 @@ import { toDate } from '../lib/format';
 export const generalChatPath = 'chats/general/messages';
 export const groupChatPath = (groupId) => `groups/${groupId}/messages`;
 
-export function subscribeMessages(path, callback, limit = LIMITS.messagesPageSize) {
+export function subscribeMessages(
+  path,
+  callback,
+  limit = LIMITS.messagesPageSize,
+  { after = null } = {}
+) {
   return store.subscribeList(
     path,
-    { orderBy: [['createdAt', 'desc']], limit },
+    {
+      ...(after ? { where: [['createdAt', '>=', after]] } : {}),
+      orderBy: [['createdAt', 'desc']],
+      limit,
+    },
     (rows) => {
       const messages = rows
         .filter((row) => row.data.createdAt)
@@ -22,9 +31,17 @@ export function subscribeMessages(path, callback, limit = LIMITS.messagesPageSiz
   );
 }
 
-export async function loadOlderMessages(path, beforeDate, limit = LIMITS.messagesPageSize) {
+export async function loadOlderMessages(
+  path,
+  beforeDate,
+  limit = LIMITS.messagesPageSize,
+  { after = null } = {}
+) {
   const rows = await store.listDocs(path, {
-    where: [['createdAt', '<', beforeDate]],
+    where: [
+      ['createdAt', '<', beforeDate],
+      ...(after ? [['createdAt', '>=', after]] : []),
+    ],
     orderBy: [['createdAt', 'desc']],
     limit,
   });

@@ -56,6 +56,10 @@ export const GROUP_SETTING_OPTIONS = {
     { value: 'all', label: 'Tutti i membri' },
     { value: 'admins', label: 'Solo fondatore e admin' },
   ],
+  matchOrganizersPolicy: [
+    { value: 'all', label: 'Tutti i membri' },
+    { value: 'admins', label: 'Solo fondatore e admin' },
+  ],
   disappearingMessages: [
     { value: 'off', label: 'Disattivati (30 giorni)' },
     { value: '24h', label: '24 ore' },
@@ -69,6 +73,7 @@ export const DEFAULT_GROUP_SETTINGS = {
   sendMessagesPolicy: 'all',
   editInfoPolicy: 'all',
   addMembersPolicy: 'all',
+  matchOrganizersPolicy: 'all',
   approveNewMembers: false,
   disappearingMessages: 'off',
 };
@@ -84,6 +89,7 @@ export function normalizeGroupSettings(source) {
     sendMessagesPolicy: policy(raw.sendMessagesPolicy),
     editInfoPolicy: policy(raw.editInfoPolicy),
     addMembersPolicy: policy(raw.addMembersPolicy),
+    matchOrganizersPolicy: policy(raw.matchOrganizersPolicy),
     approveNewMembers: raw.approveNewMembers === true,
     disappearingMessages: disappearing,
   };

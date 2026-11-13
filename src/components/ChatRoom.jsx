@@ -57,7 +57,11 @@ export function ChatRoom({
   canClearChat = false,
   composerLabel = 'questa chat',
   retentionDays = LIMITS.messageRetentionDays,
+  visibleFrom = null,
 }) {
+  // Gli ospiti temporanei non vedono i messaggi precedenti al loro ingresso:
+  // il limite è nella query, non solo nella grafica.
+  const visibleSinceMs = toDate(visibleFrom)?.getTime() || 0;
   const toast = useToast();
   const isMobile = useIsMobile();
   const { slot: composerSlot, setActive: setComposerActive } = useChatComposerDock();
@@ -106,13 +110,15 @@ export function ChatRoom({
 
   useEffect(() => {
     setOlder([]);
-    setHasMore(true);
+    setHasMore(!visibleSinceMs);
     setReplyTo(null);
     setEditing(null);
     setText('');
     setActiveMessageId(null);
-    return subscribeMessages(path, (rows) => setLive(rows));
-  }, [path]);
+    return subscribeMessages(path, (rows) => setLive(rows), LIMITS.messagesPageSize, {
+      after: visibleSinceMs ? new Date(visibleSinceMs) : null,
+    });
+  }, [path, visibleSinceMs]);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -164,7 +170,9 @@ export function ChatRoom({
     if (!first) return;
     setLoadingOlder(true);
     try {
-      const rows = await loadOlderMessages(path, toDate(first.createdAt));
+      const rows = await loadOlderMessages(path, toDate(first.createdAt), LIMITS.messagesPageSize, {
+        after: visibleSinceMs ? new Date(visibleSinceMs) : null,
+      });
       if (rows.length < LIMITS.messagesPageSize) setHasMore(false);
       setOlder((prev) => [...rows.filter((row) => !prev.some((item) => item.id === row.id)), ...prev]);
       stickRef.current = false;
@@ -408,7 +416,11 @@ export function ChatRoom({
               Svuota chat
             </button>
           ) : null}
-          {hasMore ? (
+          {visibleSinceMs ? (
+            <span className="chat-start">
+              Come ospite vedi i messaggi da quando sei entrato nella chat.
+            </span>
+          ) : hasMore ? (
             <button type="button" className="btn btn-ghost btn-sm" onClick={loadOlder} disabled={loadingOlder}>
               {loadingOlder ? <Loader2 size={14} className="spin" /> : null}
               Carica messaggi precedenti

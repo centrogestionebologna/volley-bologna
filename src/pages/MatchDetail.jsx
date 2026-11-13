@@ -223,7 +223,11 @@ export function MatchDetail() {
 
   const cancel = () => {
     if (!window.confirm('Vuoi disiscriverti da questo match?')) return;
-    run('cancel', () => cancelSignup({ matchId, uid }), 'Iscrizione annullata.');
+    run(
+      'cancel',
+      () => cancelSignup({ matchId, uid, asManager: canManageParticipants }),
+      'Iscrizione annullata.'
+    );
   };
 
   const confirm = () =>
@@ -761,12 +765,13 @@ export function MatchDetail() {
                   className="btn btn-ghost btn-block"
                   onClick={cancel}
                   disabled={
-                    busy === 'cancel' || (deadlinePassed && myReg.status === 'confirmed')
+                    busy === 'cancel' ||
+                    (deadlinePassed && myReg.status === 'confirmed' && !canManageParticipants)
                   }
                 >
                   <Trash2 size={15} /> Disiscriviti
                 </button>
-                {deadlinePassed && myReg.status === 'confirmed' ? (
+                {deadlinePassed && myReg.status === 'confirmed' && !canManageParticipants ? (
                   <p className="hint">
                     Deadline superata: non puoi disiscriverti da solo, chiedi un sostituto a{' '}
                     {match.organizerNickname}.
@@ -774,6 +779,7 @@ export function MatchDetail() {
                 ) : null}
                 {deadlinePassed &&
                 myReg.status === 'confirmed' &&
+                !canManageParticipants &&
                 match.status !== 'cancelled' &&
                 !started ? (
                   myReplacement && myReplacement.status === 'open' ? (

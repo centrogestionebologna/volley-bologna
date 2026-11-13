@@ -391,8 +391,9 @@ async function leaveMatch(matchId, uid, { skipDeadline = false, actor = null } =
     const organizerLeaving = match.organizerId === uid;
 
     // La deadline blocca solo chi occupa un posto: dalla riserva si può uscire
-    // anche dopo (chi non può più venire chiede la sostituzione).
-    if (!skipDeadline && status === 'confirmed') {
+    // anche dopo (chi non può più venire chiede la sostituzione). Chi organizza
+    // il match o il fondatore del gruppo restano sempre liberi di uscire.
+    if (!skipDeadline && status === 'confirmed' && match.organizerId !== uid) {
       const deadline = toDate(match.deadlineAt);
       if (deadline && deadline.getTime() < Date.now()) {
         throw new Error('Il termine per disiscriversi è passato: chiedi un sostituto.');
@@ -560,8 +561,10 @@ export async function expirePendingOffer(matchId) {
   return Boolean(result?.changed);
 }
 
-export async function cancelSignup({ matchId, uid }) {
-  const result = await leaveMatch(matchId, uid, { skipDeadline: false });
+export async function cancelSignup({ matchId, uid, asManager = false }) {
+  // Chi gestisce il match (organizzatore, fondatore del gruppo, admin) può
+  // uscire anche dopo la deadline: prima restava bloccato.
+  const result = await leaveMatch(matchId, uid, { skipDeadline: asManager });
   await notifyPromotedOffer(result, matchId);
   return result;
 }
@@ -768,12 +771,16 @@ function normalizeMatchInput(input) {
 export async function createMatch(
   input,
   organizer,
-  { recurring = false, recurrence = null, group = null } = {}
+  { recurring = false, recurrence = null, group = null, actorIsAdmin = false } = {}
 ) {
   if (group?.id) {
     const membership = await store.getDoc(`groups/${group.id}/members/${organizer.uid}`);
     if (membership?.data?.status !== 'active') {
       throw new Error('Solo i membri attivi possono proporre un match in questo gruppo.');
+    }
+    const policy = group.matchOrganizersPolicy === 'admins' ? 'admins' : 'all';
+    if (policy === 'admins' && group.ownerId !== organizer.uid && !actorIsAdmin) {
+      throw new Error('In questo gruppo solo il fondatore e gli admin possono organizzare i match.');
     }
   }
 

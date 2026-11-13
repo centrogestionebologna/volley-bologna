@@ -318,6 +318,7 @@ export async function updateGroupDetails({
       sendMessagesPolicy: merged.sendMessagesPolicy,
       editInfoPolicy: merged.editInfoPolicy,
       addMembersPolicy: merged.addMembersPolicy,
+      matchOrganizersPolicy: merged.matchOrganizersPolicy,
       approveNewMembers: merged.approveNewMembers,
       disappearingMessages: merged.disappearingMessages,
     });
