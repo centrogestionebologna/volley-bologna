@@ -799,7 +799,15 @@ service cloud.firestore {
     // (service account, che bypassa le regole).
     match /pushJobs/{jobId} {
       allow create: if canWrite()
-        && (request.resource.data.actorId == uid() || isAdmin())
+        && (
+          request.resource.data.actorId == uid()
+          || isAdmin()
+          // Notifica di prova a se stessi: nessun attore da escludere.
+          || (
+            request.resource.data.audience == 'user'
+            && request.resource.data.userId == uid()
+          )
+        )
         && request.resource.data.type is string
         && request.resource.data.title is string
         && request.resource.data.title.size() > 0

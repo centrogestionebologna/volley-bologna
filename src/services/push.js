@@ -8,6 +8,59 @@ const TAG_CHARS = /[^A-Za-z0-9_-]/g;
 
 export const isPushConfigured = Boolean(VAPID_PUBLIC_KEY);
 
+const DEFAULT_CATEGORIES = { chat: true, groups: true, polls: true, matches: true };
+const GROUP_LEVELS = ['all', 'important', 'none'];
+
+/** Normalizza le preferenze salvate in pushSubscriptions/{uid}.prefs. */
+export function normalizeNotificationPrefs(raw = {}) {
+  const categories = {};
+  for (const key of Object.keys(DEFAULT_CATEGORIES)) {
+    categories[key] = raw?.categories?.[key] !== false;
+  }
+  const groups = {};
+  for (const [groupId, level] of Object.entries(raw?.groups || {})) {
+    if (GROUP_LEVELS.includes(level)) groups[groupId] = level;
+  }
+  return { categories, groups };
+}
+
+export async function loadNotificationPrefs(uid) {
+  if (!uid || !store) return normalizeNotificationPrefs({});
+  const doc = await store.getDoc(`pushSubscriptions/${uid}`).catch(() => null);
+  return normalizeNotificationPrefs(doc?.data?.prefs);
+}
+
+/** Salva le preferenze senza perdere i dispositivi registrati. */
+async function saveNotificationPrefs(uid, prefs) {
+  if (!uid) throw new Error('Sessione non valida: ricarica la pagina.');
+  const existing = await store.getDoc(`pushSubscriptions/${uid}`).catch(() => null);
+  await store.setDoc(`pushSubscriptions/${uid}`, {
+    uid,
+    devices: existing?.data?.devices || {},
+    prefs,
+    updatedAt: serverTimestamp(),
+  });
+  return prefs;
+}
+
+export async function setNotificationCategory(uid, category, enabled) {
+  const current = await loadNotificationPrefs(uid);
+  return saveNotificationPrefs(uid, {
+    ...current,
+    categories: { ...current.categories, [category]: Boolean(enabled) },
+  });
+}
+
+export async function setGroupNotificationLevel(uid, groupId, level) {
+  if (!groupId) throw new Error('Gruppo non valido.');
+  const clean = GROUP_LEVELS.includes(level) ? level : 'all';
+  const current = await loadNotificationPrefs(uid);
+  const groups = { ...current.groups };
+  if (clean === 'all') delete groups[groupId];
+  else groups[groupId] = clean;
+  return saveNotificationPrefs(uid, { ...current, groups });
+}
+
 export function isPushSupported() {
   return (
     typeof window !== 'undefined' &&
@@ -100,6 +153,7 @@ export async function enablePush(uid) {
   await store.setDoc(`pushSubscriptions/${uid}`, {
     uid,
     devices,
+    ...(existing?.data?.prefs ? { prefs: existing.data.prefs } : {}),
     updatedAt: serverTimestamp(),
   });
   return true;
@@ -122,9 +176,37 @@ export async function disablePush(uid) {
       await store.setDoc(`pushSubscriptions/${uid}`, {
         uid,
         devices,
+        ...(doc?.data?.prefs ? { prefs: doc.data.prefs } : {}),
         updatedAt: serverTimestamp(),
       });
     }
+  }
+  return true;
+}
+
+/**
+ * Notifica di prova a se stessi: verifica l'intera catena
+ * browser → Firestore (pushJobs) → worker → VAPID → service worker.
+ * Il worker la invia al giro successivo (entro un minuto).
+ */
+export async function sendTestPush(uid) {
+  if (!uid) throw new Error('Sessione non valida: ricarica la pagina.');
+  if (!isPushConfigured || !store) {
+    throw new Error('Notifiche non configurate: manca VITE_VAPID_PUBLIC_KEY nel build.');
+  }
+  const queued = await queuePush({
+    type: 'test',
+    title: 'Notifica di prova',
+    body: 'Se vedi questo messaggio, le notifiche push funzionano.',
+    url: '/profilo',
+    tag: 'test-push',
+    audience: 'user',
+    userId: uid,
+  });
+  if (!queued) {
+    throw new Error(
+      'Notifica di prova non accodata: pubblica le regole Firestore aggiornate e riprova.'
+    );
   }
   return true;
 }

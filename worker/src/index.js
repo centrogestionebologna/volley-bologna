@@ -274,6 +274,31 @@ async function loadSubscriptions(db, uids) {
   return docs;
 }
 
+// Preferenze dell'utente, salvate in pushSubscriptions/{uid}.prefs dal profilo
+// e dalle impostazioni del singolo gruppo. Il worker le applica prima dell'invio.
+const PUSH_CATEGORY = {
+  chat: 'chat',
+  group: 'groups',
+  system: 'groups',
+  poll: 'polls',
+  match: 'matches',
+  offer: 'matches',
+};
+
+// Livello "solo importanti": resta tutto tranne i messaggi chat.
+const IMPORTANT_ONLY_TYPES = new Set(['group', 'system', 'poll', 'match', 'offer']);
+
+function wantsPush(prefs, job) {
+  const category = PUSH_CATEGORY[job.type];
+  if (category && prefs?.categories?.[category] === false) return false;
+  if (job.groupId) {
+    const level = prefs?.groups?.[job.groupId];
+    if (level === 'none') return false;
+    if (level === 'important' && !IMPORTANT_ONLY_TYPES.has(job.type)) return false;
+  }
+  return true;
+}
+
 async function recipientsFor(db, job) {
   if (job.audience === 'user') {
     return loadSubscriptions(db, [job.userId]);
@@ -341,6 +366,7 @@ async function dispatchPushQueue(env, db) {
       };
       for (const row of subscriptions) {
         if (data.actorId && row.id === data.actorId) continue;
+        if (!wantsPush(row.data.prefs, data)) continue;
         for (const [deviceId, device] of Object.entries(row.data.devices || {})) {
           if (summary.sent >= PUSH_MAX_SENDS) break;
           if (!device?.endpoint) continue;

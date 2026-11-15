@@ -4,6 +4,7 @@ import {
   ArrowLeft,
   Ban,
   BarChart3,
+  Bell,
   CalendarPlus,
   Check,
   ChevronLeft,
@@ -27,6 +28,7 @@ import { useAuth } from '../auth/AuthProvider';
 import { store } from '../backend';
 import {
   GROUP_SETTING_OPTIONS,
+  NOTIFICATION_LEVELS,
   PROFILE_REQUIREMENTS,
   VOLLEY_ROLES,
   labelOf,
@@ -52,6 +54,7 @@ import {
   subscribeMembership,
 } from '../services/groups';
 import { groupChatPath } from '../services/chat';
+import { loadNotificationPrefs, setGroupNotificationLevel } from '../services/push';
 import { createPoll, subscribePolls } from '../services/polls';
 import { createPlayerRequest } from '../services/playerRequests';
 import { Avatar, Chip, EmptyState, Field, Modal, Spinner } from '../components/ui';
@@ -134,6 +137,7 @@ export function GroupDetail() {
   const [pollsOpen, setPollsOpen] = useState(false);
   const [pollBusy, setPollBusy] = useState('');
   const [pollForm, setPollForm] = useState({ question: '', options: ['', ''] });
+  const [groupNotify, setGroupNotify] = useState('all');
   const attemptedInvite = useRef(false);
 
   // Selettore gruppi e menu del "+" non devono mai sovrapporsi.
@@ -176,6 +180,20 @@ export function GroupDetail() {
       );
     })
     .sort((a, b) => (toDate(a.startsAt)?.getTime() || 0) - (toDate(b.startsAt)?.getTime() || 0));
+
+  // Preferenze di notifica per questo gruppo (override rispetto al profilo).
+  useEffect(() => {
+    if (!uid || !isMember) return undefined;
+    let active = true;
+    loadNotificationPrefs(uid)
+      .then((prefs) => {
+        if (active) setGroupNotify(prefs.groups?.[groupId] || 'all');
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [uid, isMember, groupId]);
 
   const profileChecksState = useAsync(
     () => (uid ? loadProfileChecks(uid) : Promise.resolve(null)),
@@ -472,6 +490,27 @@ export function GroupDetail() {
       toast.error(error.message || 'Sondaggio non pubblicato.');
     } finally {
       setPollBusy('');
+    }
+  };
+
+  const changeGroupNotify = async (level) => {
+    const previous = groupNotify;
+    setGroupNotify(level);
+    setBusy(`notify-${level}`);
+    try {
+      await setGroupNotificationLevel(uid, groupId, level);
+      toast.success(
+        level === 'none'
+          ? 'Notifiche silenziate per questo gruppo.'
+          : level === 'important'
+            ? 'Riceverai solo gli aggiornamenti importanti.'
+            : 'Riceverai tutte le notifiche del gruppo.'
+      );
+    } catch (error) {
+      setGroupNotify(previous);
+      toast.error(error.message || 'Impostazioni non salvate.');
+    } finally {
+      setBusy('');
     }
   };
 
@@ -793,6 +832,16 @@ export function GroupDetail() {
                     }}
                   >
                     <BarChart3 size={16} /> Sondaggi del gruppo
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setActionsOpen(false);
+                      navigate(`/gruppi/${groupId}?tab=membri`);
+                    }}
+                  >
+                    <Bell size={16} /> Notifiche del gruppo
                   </button>
                   {canSearchPlayers && availableMatches.length > 0 ? (
                     <button
@@ -1191,6 +1240,36 @@ export function GroupDetail() {
                     Le candidature arrivano qui: le approvi dalla card in #generale.
                   </p>
                 )}
+              </section>
+            ) : null}
+
+            {isMember ? (
+              <section className="card card-pad">
+                <h2 className="card-title">
+                  <Bell size={17} /> Notifiche del gruppo
+                </h2>
+                <p className="small muted">
+                  Scegli cosa ricevere su questo dispositivo per {group.name}. Le notifiche chat,
+                  sondaggi ed eventi seguono questa scelta.
+                </p>
+                <div className="notify-levels">
+                  {NOTIFICATION_LEVELS.map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      className={`notify-level ${groupNotify === option.value ? 'active' : ''}`}
+                      onClick={() => changeGroupNotify(option.value)}
+                      disabled={busy === `notify-${option.value}`}
+                      aria-pressed={groupNotify === option.value}
+                    >
+                      <strong>{option.label}</strong>
+                      <small>{option.hint}</small>
+                    </button>
+                  ))}
+                </div>
+                <p className="hint">
+                  Le categorie generali (chat, gruppi, sondaggi, match) si gestiscono dal profilo.
+                </p>
               </section>
             ) : null}
 

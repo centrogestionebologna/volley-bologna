@@ -70,6 +70,22 @@ export const GROUP_SETTING_OPTIONS = {
 
 // Dati che il fondatore può richiedere a chi chiede di entrare nel gruppo.
 // Restano privati: il gruppo salva solo se sono presenti, non i valori.
+// Categorie di notifiche che l'utente può accendere o spegnere dal profilo.
+// Il worker `volley-bologna-push` mappa i tipi di push su queste chiavi.
+export const NOTIFICATION_CATEGORIES = [
+  { value: 'chat', label: 'Messaggi in chat', hint: 'Chat generale e chat dei gruppi.' },
+  { value: 'groups', label: 'Eventi e richieste del gruppo', hint: 'Ingressi, uscite, approvazioni e aggiornamenti.' },
+  { value: 'polls', label: 'Sondaggi', hint: 'Nuovi sondaggi e chiusure.' },
+  { value: 'matches', label: 'Match e posti in riserva', hint: 'Nuovi match, offerte di posto e sostituzioni.' },
+];
+
+// Livello di notifiche per un singolo gruppo (override del profilo).
+export const NOTIFICATION_LEVELS = [
+  { value: 'all', label: 'Tutte', hint: 'Messaggi, sondaggi ed eventi del gruppo.' },
+  { value: 'important', label: 'Solo importanti', hint: 'Sondaggi, eventi e richieste, senza i messaggi chat.' },
+  { value: 'none', label: 'Nessuna', hint: 'Silenzia le notifiche di questo gruppo.' },
+];
+
 export const PROFILE_REQUIREMENTS = [
   { value: 'fullName', label: 'Nome e cognome' },
   { value: 'phone', label: 'Numero di telefono' },

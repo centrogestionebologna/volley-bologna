@@ -4,6 +4,7 @@ import {
   BadgeCheck,
   Bell,
   BellOff,
+  BellRing,
   Copy,
   Lock,
   LogOut,
@@ -29,11 +30,15 @@ import {
   disablePushQuietly,
   enablePush,
   getPushState,
+  loadNotificationPrefs,
+  normalizeNotificationPrefs,
+  sendTestPush,
+  setNotificationCategory,
 } from '../services/push';
 import { Avatar, Chip, EmptyState, Field, PageHead, Spinner } from '../components/ui';
 import { useToast } from '../components/Toast';
 import { formatDateShort, formatDateTime, toDate } from '../lib/format';
-import { LIMITS } from '../config';
+import { LIMITS, NOTIFICATION_CATEGORIES } from '../config';
 
 export function Profile() {
   const { uid, user, profile, nickname, isAdmin, signOut, refresh } = useAuth();
@@ -46,6 +51,7 @@ export function Profile() {
   const [phone, setPhone] = useState('');
   const [busy, setBusy] = useState('');
   const [pushState, setPushState] = useState('loading');
+  const [notifPrefs, setNotifPrefs] = useState(null);
 
   useEffect(() => {
     setNick(profile?.nickname || nickname);
@@ -71,6 +77,20 @@ export function Profile() {
       .then(setPushState)
       .catch(() => setPushState('unsupported'));
   }, []);
+
+  useEffect(() => {
+    let active = true;
+    loadNotificationPrefs(uid)
+      .then((prefs) => {
+        if (active) setNotifPrefs(prefs);
+      })
+      .catch(() => {
+        if (active) setNotifPrefs(normalizeNotificationPrefs({}));
+      });
+    return () => {
+      active = false;
+    };
+  }, [uid]);
 
   const savePublic = async () => {
     setBusy('public');
@@ -130,6 +150,45 @@ export function Profile() {
       toast.error(error.message || 'Impossibile aggiornare le notifiche.');
     } finally {
       setPushState(await getPushState().catch(() => 'unsupported'));
+      setBusy('');
+    }
+  };
+
+  const toggleCategory = async (key) => {
+    if (!notifPrefs) return;
+    const next = !notifPrefs.categories?.[key];
+    setNotifPrefs((prev) => ({
+      ...prev,
+      categories: { ...prev.categories, [key]: next },
+    }));
+    setBusy(`pref-${key}`);
+    try {
+      const saved = await setNotificationCategory(uid, key, next);
+      setNotifPrefs(saved);
+      toast.success(
+        next
+          ? 'Notifiche attivate per questa categoria.'
+          : 'Notifiche disattivate per questa categoria.'
+      );
+    } catch (error) {
+      setNotifPrefs((prev) => ({
+        ...prev,
+        categories: { ...prev.categories, [key]: !next },
+      }));
+      toast.error(error.message || 'Impostazioni non salvate.');
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const testPush = async () => {
+    setBusy('test-push');
+    try {
+      await sendTestPush(uid);
+      toast.success('Notifica di prova in coda: arriva entro un minuto.');
+    } catch (error) {
+      toast.error(error.message || 'Notifica di prova non inviata.');
+    } finally {
       setBusy('');
     }
   };
@@ -377,25 +436,64 @@ export function Profile() {
                 Permesso bloccato dal browser: riabilitalo dalle impostazioni del sito.
               </p>
             ) : (
-              <button
-                type="button"
-                className={`btn ${pushState === 'subscribed' ? 'btn-ghost' : 'btn-primary'} btn-block`}
-                onClick={togglePush}
-                disabled={busy === 'push' || pushState === 'loading'}
-              >
+              <div className="notify-actions">
+                <button
+                  type="button"
+                  className={`btn ${pushState === 'subscribed' ? 'btn-ghost' : 'btn-primary'} btn-block`}
+                  onClick={togglePush}
+                  disabled={busy === 'push' || pushState === 'loading'}
+                >
+                  {pushState === 'subscribed' ? (
+                    <>
+                      <BellOff size={16} /> Disattiva notifiche
+                    </>
+                  ) : (
+                    <>
+                      <Bell size={16} /> Attiva notifiche
+                    </>
+                  )}
+                </button>
                 {pushState === 'subscribed' ? (
-                  <>
-                    <BellOff size={16} /> Disattiva notifiche
-                  </>
-                ) : (
-                  <>
-                    <Bell size={16} /> Attiva notifiche
-                  </>
-                )}
-              </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-block"
+                    onClick={testPush}
+                    disabled={busy === 'test-push'}
+                  >
+                    <BellRing size={16} />
+                    {busy === 'test-push' ? 'Invio della prova…' : 'Verifica notifiche'}
+                  </button>
+                ) : null}
+              </div>
             )}
             {pushState === 'subscribed' ? (
-              <p className="hint">Notifiche attive su questo dispositivo.</p>
+              <p className="hint">
+                Notifiche attive su questo dispositivo. La verifica passa dal worker Cloudflare:
+                arriva entro un minuto.
+              </p>
+            ) : null}
+            {notifPrefs && pushState !== 'unsupported' && pushState !== 'unconfigured' ? (
+              <div className="notify-prefs">
+                <h3 className="notify-prefs-title">Cosa ricevere</h3>
+                {NOTIFICATION_CATEGORIES.map((item) => (
+                  <label key={item.value} className="check notify-pref">
+                    <input
+                      type="checkbox"
+                      checked={notifPrefs.categories?.[item.value] !== false}
+                      onChange={() => toggleCategory(item.value)}
+                      disabled={busy === `pref-${item.value}`}
+                    />
+                    <span>
+                      <strong>{item.label}</strong>
+                      <small>{item.hint}</small>
+                    </span>
+                  </label>
+                ))}
+                <p className="hint">
+                  Le notifiche del singolo gruppo si impostano nella pagina del gruppo, alla voce
+                  “Notifiche del gruppo”.
+                </p>
+              </div>
             ) : null}
           </section>
 
