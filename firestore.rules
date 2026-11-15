@@ -617,12 +617,36 @@ service cloud.firestore {
             && matchData(request.resource.data.matchId).organizerId == uid()
             && matchData(request.resource.data.matchId).groupId == groupId
           )
+          // Eventi del gruppo (ingressi, uscite, aggiornamenti, sondaggi):
+          // restano visibili anche quando solo il fondatore può scrivere.
+          || request.resource.data.type in ['system', 'poll']
         )
         && request.resource.data.authorId == uid()
         && request.resource.data.deleted == false
         && request.resource.data.text is string
         && request.resource.data.text.size() > 0
-        && request.resource.data.text.size() <= 1200;
+        && request.resource.data.text.size() <= 1200
+        && (
+          !('type' in request.resource.data)
+          || (
+            request.resource.data.type in ['match', 'system', 'poll']
+            && (
+              request.resource.data.type != 'system'
+              || (
+                request.resource.data.systemKind is string
+                && request.resource.data.systemKind.size() <= 40
+              )
+            )
+            && (
+              request.resource.data.type != 'poll'
+              || (
+                request.resource.data.pollId is string
+                && exists(/databases/$(database)/documents/groups/$(groupId)/polls/$(request.resource.data.pollId))
+                && get(/databases/$(database)/documents/groups/$(groupId)/polls/$(request.resource.data.pollId)).data.createdBy == uid()
+              )
+            )
+          )
+        );
       allow update: if isAdmin()
         || isGroupOwner(groupId)
         || (

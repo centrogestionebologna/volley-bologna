@@ -2,7 +2,7 @@ import { store } from '../backend';
 import { serverTimestamp } from '../store/base';
 import { VOLLEY_ROLES } from '../config';
 import { toDate } from '../lib/format';
-import { postPlayerRequestProposal } from './chat';
+import { postGroupSystemMessage, postPlayerRequestProposal } from './chat';
 import { queuePush } from './push';
 
 const requestPath = (requestId) => `playerRequests/${requestId}`;
@@ -206,6 +206,12 @@ export async function approveApplication({ requestId, applicantUid, reviewerUid 
 
   const guest = result?.guest || null;
   if (guest) {
+    await postGroupSystemMessage({
+      groupId: guest.groupId,
+      actorUid: reviewerUid,
+      kind: 'guest-joined',
+      text: `${guest.nickname} è entrato/a nella chat come ospite.`,
+    });
     await queuePush({
       type: 'group',
       title: 'Candidatura approvata',

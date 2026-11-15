@@ -156,6 +156,50 @@ export async function postMatchProposalToGroup({ groupId, organizer, matchId, ma
   });
 }
 
+/**
+ * Evento di sistema nella chat del gruppo, in stile WhatsApp: "X si è unito/a".
+ * Non blocca l'azione principale se le regole Firestore lo rifiutano.
+ */
+export async function postGroupSystemMessage({ groupId, actorUid, text, kind = 'info' }) {
+  if (!groupId || !actorUid) return null;
+  const clean = String(text || '').trim().slice(0, 500);
+  if (!clean) return null;
+  try {
+    return await store.addDoc(groupChatPath(groupId), {
+      authorId: actorUid,
+      authorNickname: 'Sistema',
+      text: clean,
+      type: 'system',
+      systemKind: String(kind || 'info').slice(0, 40),
+      createdAt: serverTimestamp(),
+      editedAt: null,
+      deleted: false,
+      deletedAt: null,
+      replyTo: null,
+    });
+  } catch (error) {
+    console.warn('Evento del gruppo non pubblicato in chat', error?.message);
+    return null;
+  }
+}
+
+/** Pubblica la scheda di un sondaggio nella chat del gruppo. */
+export async function postPollMessage({ groupId, actorUid, pollId, question, nickname = '' }) {
+  if (!groupId || !actorUid || !pollId) return null;
+  return store.addDoc(groupChatPath(groupId), {
+    authorId: actorUid,
+    authorNickname: nickname || 'Membro',
+    text: `Sondaggio: ${String(question || 'nuovo sondaggio').slice(0, 160)}`,
+    type: 'poll',
+    pollId,
+    createdAt: serverTimestamp(),
+    editedAt: null,
+    deleted: false,
+    deletedAt: null,
+    replyTo: null,
+  });
+}
+
 /** Pubblica una ricerca giocatori senza esporre il nome del gruppo né chi la lancia. */
 export async function postPlayerRequestProposal({ organizer, requestId, request }) {
   if (!organizer?.uid || !requestId) throw new Error('Dati della ricerca non validi.');

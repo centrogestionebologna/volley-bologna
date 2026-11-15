@@ -52,105 +52,20 @@ import {
   subscribeMembership,
 } from '../services/groups';
 import { groupChatPath } from '../services/chat';
-import {
-  closePoll,
-  createPoll,
-  deletePoll,
-  subscribePollVotes,
-  subscribePolls,
-  tallyVotes,
-  votePoll,
-} from '../services/polls';
+import { createPoll, subscribePolls } from '../services/polls';
 import { createPlayerRequest } from '../services/playerRequests';
 import { Avatar, Chip, EmptyState, Field, Modal, Spinner } from '../components/ui';
 import { ChatRoom } from '../components/ChatRoom';
+import { PollCard } from '../components/PollCard';
 import { useChatComposerDock } from '../components/ChatComposerDock';
 import { PrivateGroupGate } from '../components/PrivateGroupGate';
 import { useToast } from '../components/Toast';
 import { formatDateShort, toDate } from '../lib/format';
 
-function PollCard({ groupId, poll, uid, canManage, busy, onVote, onClose, onDelete }) {
-  const votesState = useSubscription(
-    (cb) => subscribePollVotes(groupId, poll.id, cb),
-    [groupId, poll.id]
-  );
-  const votes = (votesState.data || []).map((row) => ({ id: row.id, ...row.data }));
-  const options = poll.options || [];
-  const counts = tallyVotes(votes, options.length);
-  const total = counts.reduce((sum, value) => sum + value, 0);
-  const myVote = votes.find((vote) => vote.uid === uid);
-  const closed = poll.status === 'closed';
-
-  return (
-    <article className="poll-card">
-      <div className="poll-head">
-        <strong>{poll.question}</strong>
-        <Chip tone={closed ? 'muted' : 'green'}>
-          {closed ? 'Chiuso' : `${total} ${total === 1 ? 'voto' : 'voti'}`}
-        </Chip>
-      </div>
-      <div className="poll-options">
-        {options.map((option, index) => {
-          const count = counts[index] || 0;
-          const percent = total ? Math.round((count / total) * 100) : 0;
-          const selected = myVote?.optionIndex === index;
-          return (
-            <button
-              key={`${poll.id}-${index}`}
-              type="button"
-              className={`poll-option ${selected ? 'selected' : ''}`}
-              onClick={() => onVote(poll, index)}
-              disabled={closed || busy === `vote-${poll.id}`}
-            >
-              <span className="poll-option-bar" style={{ width: `${percent}%` }} aria-hidden />
-              <span className="poll-option-label">{option}</span>
-              <span className="poll-option-count">{count} · {percent}%</span>
-            </button>
-          );
-        })}
-      </div>
-      <div className="poll-foot">
-        <small className="muted">
-          {poll.createdByName || 'Membro'} · {formatDateShort(poll.createdAt)}
-          {selectedLabelSuffix(myVote, options)}
-        </small>
-        {canManage ? (
-          <div className="row-actions">
-            {closed ? null : (
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm"
-                onClick={() => onClose(poll)}
-                disabled={busy === `close-${poll.id}`}
-              >
-                Chiudi
-              </button>
-            )}
-            <button
-              type="button"
-              className="btn btn-ghost btn-sm danger-text"
-              onClick={() => onDelete(poll)}
-              disabled={busy === `delete-${poll.id}`}
-            >
-              <Trash2 size={14} /> Elimina
-            </button>
-          </div>
-        ) : null}
-      </div>
-    </article>
-  );
-}
-
 function profileSummary(required = [], checks = null) {
   if (!checks) return '';
   const missing = missingProfileLabels(required, checks);
   return missing.length ? ` · manca: ${missing.join(', ').toLowerCase()}` : ' · profilo completo';
-}
-
-function selectedLabelSuffix(vote, options) {
-  if (!vote) return '';
-  const index = Number(vote.optionIndex);
-  return options[index] ? ' · hai votato' : '';
 }
 
 export function GroupDetail() {
@@ -376,7 +291,7 @@ export function GroupDetail() {
   const approve = async (member) => {
     setBusy(`approve-${member.id}`);
     try {
-      await approveMember({ groupId, uid: member.id });
+      await approveMember({ groupId, uid: member.id, actorUid: uid });
       toast.success(`${member.nickname} è entrato nel gruppo.`);
     } catch (error) {
       toast.error(error.message);
@@ -541,52 +456,20 @@ export function GroupDetail() {
     event.preventDefault();
     setPollBusy('create');
     try {
-      await createPoll({
+      const result = await createPoll({
         groupId,
         user: { uid, nickname: profile?.nickname || nickname },
         question: pollForm.question,
         options: pollForm.options,
       });
       setPollForm({ question: '', options: ['', ''] });
-      toast.success('Sondaggio pubblicato.');
+      toast.success(
+        result?.chatPosted
+          ? 'Sondaggio pubblicato nella chat del gruppo.'
+          : 'Sondaggio creato, ma non pubblicato in chat: controlla le regole Firestore.'
+      );
     } catch (error) {
       toast.error(error.message || 'Sondaggio non pubblicato.');
-    } finally {
-      setPollBusy('');
-    }
-  };
-
-  const vote = async (poll, optionIndex) => {
-    setPollBusy(`vote-${poll.id}`);
-    try {
-      await votePoll({ groupId, pollId: poll.id, uid, optionIndex });
-    } catch (error) {
-      toast.error(error.message || 'Voto non registrato.');
-    } finally {
-      setPollBusy('');
-    }
-  };
-
-  const closePollAction = async (poll) => {
-    setPollBusy(`close-${poll.id}`);
-    try {
-      await closePoll({ groupId, pollId: poll.id });
-      toast.success('Sondaggio chiuso.');
-    } catch (error) {
-      toast.error(error.message || 'Sondaggio non chiuso.');
-    } finally {
-      setPollBusy('');
-    }
-  };
-
-  const removePoll = async (poll) => {
-    if (!window.confirm('Eliminare questo sondaggio?')) return;
-    setPollBusy(`delete-${poll.id}`);
-    try {
-      await deletePoll({ groupId, pollId: poll.id });
-      toast.success('Sondaggio eliminato.');
-    } catch (error) {
-      toast.error(error.message || 'Sondaggio non eliminato.');
     } finally {
       setPollBusy('');
     }
@@ -764,7 +647,7 @@ export function GroupDetail() {
         open={pollsOpen}
         onClose={() => setPollsOpen(false)}
         title="Sondaggi del gruppo"
-        subtitle="Un voto per persona: puoi cambiare scelta finché il sondaggio è aperto."
+        subtitle="Il sondaggio compare anche nella chat del gruppo. Un voto per persona: puoi cambiare scelta finché è aperto."
         footer={
           <button type="button" className="btn btn-ghost" onClick={() => setPollsOpen(false)}>
             Chiudi
@@ -829,10 +712,6 @@ export function GroupDetail() {
                 poll={poll}
                 uid={uid}
                 canManage={poll.createdBy === uid || isOwner || isAdmin}
-                busy={pollBusy}
-                onVote={vote}
-                onClose={closePollAction}
-                onDelete={removePoll}
               />
             ))
           )}

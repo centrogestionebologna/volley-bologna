@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { Flag, Loader2, Pencil, Reply, Send, Smile, Trash2, X } from 'lucide-react';
 import { Avatar, Modal } from './ui';
 import { MatchProposalCard, PlayerRequestCard } from './ChatProposal';
+import { PollCard } from './PollCard';
 import { EmojiPicker } from './EmojiPicker';
 import { useToast } from './Toast';
 import { useChatComposerDock } from './ChatComposerDock';
@@ -62,6 +63,8 @@ export function ChatRoom({
   // Gli ospiti temporanei non vedono i messaggi precedenti al loro ingresso:
   // il limite è nella query, non solo nella grafica.
   const visibleSinceMs = toDate(visibleFrom)?.getTime() || 0;
+  // I sondaggi vivono in groups/{groupId}/polls: la chat ricava il gruppo dal path.
+  const groupId = String(path).startsWith('groups/') ? String(path).split('/')[1] : null;
   const toast = useToast();
   const isMobile = useIsMobile();
   const { slot: composerSlot, setActive: setComposerActive } = useChatComposerDock();
@@ -445,18 +448,33 @@ export function ChatRoom({
             !previous || dayLabel(previous.createdAt) !== dayLabel(message.createdAt);
           const own = message.authorId === currentUser.uid;
           const isProposal = message.type === 'match' || message.type === 'playerRequest';
-          const canEdit = own && !message.deleted && !isProposal;
-          const canDelete = (isModerator || (own && !isProposal)) && !message.deleted;
-          const canReport = !own && !message.deleted && !isProposal;
-          const canReply = canWrite && !message.deleted && !isProposal;
+          const isPoll = message.type === 'poll';
+          const isSystem = message.type === 'system';
+          const canEdit = own && !message.deleted && !isProposal && !isPoll && !isSystem;
+          const canDelete =
+            (isModerator || (own && !isProposal && !isPoll && !isSystem)) && !message.deleted;
+          const canReport = !own && !message.deleted && !isProposal && !isPoll && !isSystem;
+          const canReply = canWrite && !message.deleted && !isProposal && !isPoll && !isSystem;
           const hasActions = canDelete || canReply || canReport;
           const actionsOpen = activeMessageId === message.id;
+
+          // Evento del gruppo in stile WhatsApp: riga centrata, senza bolle.
+          if (isSystem) {
+            return (
+              <div key={message.id}>
+                {showDay ? <div className="day-divider">{dayLabel(message.createdAt)}</div> : null}
+                <div className="msg-system" title={formatTime(message.createdAt)}>
+                  <span>{message.text}</span>
+                </div>
+              </div>
+            );
+          }
 
           return (
             <div key={message.id}>
               {showDay ? <div className="day-divider">{dayLabel(message.createdAt)}</div> : null}
               <div
-                className={`msg ${own ? 'own' : ''} ${isProposal ? 'msg-proposal' : ''} ${actionsOpen ? 'actions-open' : ''}`}
+                className={`msg ${own ? 'own' : ''} ${isProposal || isPoll ? 'msg-proposal' : ''} ${actionsOpen ? 'actions-open' : ''}`}
                 onClick={
                   hasActions
                     ? (event) => {
@@ -479,9 +497,9 @@ export function ChatRoom({
                 tabIndex={hasActions ? 0 : undefined}
                 aria-expanded={hasActions ? actionsOpen : undefined}
               >
-                {!own ? <Avatar name={message.authorNickname} size="sm" /> : null}
+                {!own && !isPoll ? <Avatar name={message.authorNickname} size="sm" /> : null}
                 <div className="msg-content">
-                  {!own ? <span className="msg-author">{message.authorNickname}</span> : null}
+                  {!own && !isPoll ? <span className="msg-author">{message.authorNickname}</span> : null}
                   {message.deleted ? (
                     <div className="msg-bubble deleted">
                       <p className="msg-deleted">Questo messaggio è stato eliminato</p>
@@ -498,6 +516,18 @@ export function ChatRoom({
                       )}
                       <div className="msg-meta msg-meta--proposal">
                         {message.editedAt ? <span className="edited">Modificato</span> : null}
+                        <time>{formatTime(message.createdAt)}</time>
+                      </div>
+                    </div>
+                  ) : isPoll ? (
+                    <div className="msg-proposal-body">
+                      <PollCard
+                        groupId={groupId}
+                        pollId={message.pollId}
+                        uid={currentUser.uid}
+                        canManage={isModerator || own}
+                      />
+                      <div className="msg-meta msg-meta--proposal">
                         <time>{formatTime(message.createdAt)}</time>
                       </div>
                     </div>

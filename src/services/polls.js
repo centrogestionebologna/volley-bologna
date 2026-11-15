@@ -1,5 +1,6 @@
 import { store } from '../backend';
 import { serverTimestamp } from '../store/base';
+import { postGroupSystemMessage, postPollMessage } from './chat';
 
 const pollsPath = (groupId) => `groups/${groupId}/polls`;
 export const pollPath = (groupId, pollId) => `groups/${groupId}/polls/${pollId}`;
@@ -13,6 +14,11 @@ export function subscribePolls(groupId, callback) {
     { orderBy: [['createdAt', 'desc']], limit: 20 },
     callback
   );
+}
+
+export function subscribePoll(groupId, pollId, callback) {
+  if (!groupId || !pollId) return () => {};
+  return store.subscribeDoc(pollPath(groupId, pollId), callback);
 }
 
 export function subscribePollVotes(groupId, pollId, callback) {
@@ -33,7 +39,7 @@ export async function createPoll({ groupId, user, question, options = [] }) {
     .slice(0, 8);
   if (cleanOptions.length < 2) throw new Error('Servono almeno due opzioni diverse.');
 
-  return store.addDoc(pollsPath(groupId), {
+  const pollId = await store.addDoc(pollsPath(groupId), {
     question: cleanQuestion.slice(0, 200),
     options: cleanOptions.map((item) => item.slice(0, 80)),
     createdBy: user.uid,
@@ -43,6 +49,23 @@ export async function createPoll({ groupId, user, question, options = [] }) {
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
+
+  // Il sondaggio compare subito nella chat del gruppo, con la scheda per votare.
+  let chatPosted = false;
+  try {
+    await postPollMessage({
+      groupId,
+      actorUid: user.uid,
+      pollId,
+      question: cleanQuestion,
+      nickname: user.nickname,
+    });
+    chatPosted = true;
+  } catch (error) {
+    console.warn('Sondaggio non pubblicato in chat', error?.message);
+  }
+
+  return { id: pollId, chatPosted };
 }
 
 export async function votePoll({ groupId, pollId, uid, optionIndex }) {
@@ -56,12 +79,22 @@ export async function votePoll({ groupId, pollId, uid, optionIndex }) {
   });
 }
 
-export async function closePoll({ groupId, pollId }) {
+export async function closePoll({ groupId, pollId, uid = null, question = '' }) {
   await store.updateDoc(pollPath(groupId, pollId), {
     status: 'closed',
     closedAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
+  if (uid) {
+    await postGroupSystemMessage({
+      groupId,
+      actorUid: uid,
+      kind: 'poll-closed',
+      text: question
+        ? `Il sondaggio «${String(question).slice(0, 120)}» è stato chiuso.`
+        : 'Un sondaggio è stato chiuso.',
+    });
+  }
 }
 
 export async function deletePoll({ groupId, pollId }) {

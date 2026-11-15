@@ -7,6 +7,7 @@ import {
 import { serverTimestamp } from '../store/base';
 import { sha256Hex, generateInviteCode, normalizeInviteCode } from '../lib/crypto';
 import { queuePush } from './push';
+import { postGroupSystemMessage } from './chat';
 
 const memberPath = (groupId, uid) => `groups/${groupId}/members/${uid}`;
 
@@ -116,6 +117,13 @@ export async function createGroup({ name, description = '', visibility, owner, a
       joinedAt: serverTimestamp(),
     });
 
+    await postGroupSystemMessage({
+      groupId,
+      actorUid: owner.uid,
+      kind: 'group-created',
+      text: `${ownerNickname} ha creato il gruppo.`,
+    });
+
     return { id: groupId, inviteCode };
   } catch (error) {
     if (groupId) {
@@ -140,6 +148,7 @@ export async function createGroup({ name, description = '', visibility, owner, a
 export async function joinGroup({ groupId, user, inviteCode = '' }) {
   const invite = normalizeInviteCode(inviteCode);
   let pendingNotify = null;
+  let joinedNow = false;
   const status = await store.runTransaction(async (tx) => {
     const groupDoc = await tx.get(`groups/${groupId}`);
     if (!groupDoc) throw new Error('Gruppo non trovato.');
@@ -157,6 +166,8 @@ export async function joinGroup({ groupId, user, inviteCode = '' }) {
       inviteHash = await sha256Hex(invite);
       status = group.visibility === 'private' && group.approveNewMembers === true ? 'pending' : 'active';
     }
+    // L'evento in chat solo per un ingresso reale, non per chi era già membro.
+    joinedNow = status === 'active' && existing?.data?.status !== 'active';
     pendingNotify = status === 'pending'
       ? { ownerId: group.ownerId, groupName: group.name || 'Gruppo' }
       : null;
@@ -211,6 +222,15 @@ export async function joinGroup({ groupId, user, inviteCode = '' }) {
     return status;
   });
 
+  if (status === 'active' && joinedNow) {
+    await postGroupSystemMessage({
+      groupId,
+      actorUid: user.uid,
+      kind: 'member-joined',
+      text: `${user.nickname || 'Un membro'} si è unito/a al gruppo.`,
+    });
+  }
+
   if (status === 'pending' && pendingNotify?.ownerId) {
     await queuePush({
       type: 'group',
@@ -257,21 +277,31 @@ export async function ensureInviteIndex({ groupId, inviteCode, ownerId }) {
   return inviteHash;
 }
 
-export async function approveMember({ groupId, uid }) {
-  return store.runTransaction(async (tx) => {
+export async function approveMember({ groupId, uid, actorUid = null }) {
+  const nickname = await store.runTransaction(async (tx) => {
     const [groupDoc, memberDoc] = await Promise.all([
       tx.get(`groups/${groupId}`),
       tx.get(memberPath(groupId, uid)),
     ]);
     if (!groupDoc || !memberDoc) throw new Error('Richiesta non trovata.');
-    if (memberDoc.data.status === 'active') return;
+    if (memberDoc.data.status === 'active') return null;
     tx.update(memberPath(groupId, uid), { status: 'active' });
     tx.update(`groups/${groupId}`, {
       memberCount: (groupDoc.data.memberCount || 1) + 1,
       pendingCount: Math.max(0, (groupDoc.data.pendingCount || 0) - 1),
       updatedAt: serverTimestamp(),
     });
+    return memberDoc.data.nickname || 'Un membro';
   });
+
+  if (nickname && actorUid) {
+    await postGroupSystemMessage({
+      groupId,
+      actorUid,
+      kind: 'member-approved',
+      text: `${nickname} è entrato nel gruppo.`,
+    });
+  }
 }
 
 export async function rejectMember({ groupId, uid }) {
@@ -291,6 +321,19 @@ export async function rejectMember({ groupId, uid }) {
 }
 
 export async function leaveGroup({ groupId, uid }) {
+  const current = await store.getDoc(memberPath(groupId, uid));
+  if (!current) return null;
+  if (current.data.role === 'owner') {
+    throw new Error('Il fondatore non può lasciare il gruppo: può eliminarlo o trasferirlo.');
+  }
+  // Il messaggio va scritto prima dell'uscita: dopo non si è più membri e le
+  // regole Firestore non permettono di scrivere nella chat del gruppo.
+  await postGroupSystemMessage({
+    groupId,
+    actorUid: uid,
+    kind: 'member-left',
+    text: `${current.data.nickname || 'Un membro'} ha lasciato il gruppo.`,
+  });
   return store.runTransaction(async (tx) => {
     const groupDoc = await tx.get(`groups/${groupId}`);
     const memberDoc = await tx.get(memberPath(groupId, uid));
@@ -308,7 +351,7 @@ export async function leaveGroup({ groupId, uid }) {
 }
 
 export async function setGroupBan({ groupId, targetUid, banned, actorUid, actorIsAdmin = false }) {
-  return store.runTransaction(async (tx) => {
+  const removed = await store.runTransaction(async (tx) => {
     const groupDoc = await tx.get(`groups/${groupId}`);
     if (!groupDoc) throw new Error('Gruppo non trovato.');
     const group = groupDoc.data;
@@ -319,7 +362,9 @@ export async function setGroupBan({ groupId, targetUid, banned, actorUid, actorI
     const memberDoc = await tx.get(memberPath(groupId, targetUid));
     let memberCount = group.memberCount || 1;
     let pendingCount = group.pendingCount || 0;
+    let nickname = '';
     if (banned && memberDoc) {
+      nickname = memberDoc.data.nickname || '';
       tx.delete(memberPath(groupId, targetUid));
       if (memberDoc.data.status === 'active') memberCount = Math.max(1, memberCount - 1);
       if (memberDoc.data.status === 'pending') pendingCount = Math.max(0, pendingCount - 1);
@@ -330,7 +375,17 @@ export async function setGroupBan({ groupId, targetUid, banned, actorUid, actorI
       pendingCount,
       updatedAt: serverTimestamp(),
     });
+    return banned ? nickname : '';
   });
+
+  if (removed) {
+    await postGroupSystemMessage({
+      groupId,
+      actorUid,
+      kind: 'member-banned',
+      text: `${removed} è stato rimosso dal gruppo.`,
+    });
+  }
 }
 
 export async function updateGroupDetails({
@@ -376,6 +431,14 @@ export async function updateGroupDetails({
   }
 
   await store.updateDoc(`groups/${groupId}`, patch);
+  if (actorUid) {
+    await postGroupSystemMessage({
+      groupId,
+      actorUid,
+      kind: 'group-updated',
+      text: 'Le informazioni del gruppo sono state aggiornate.',
+    });
+  }
   return merged;
 }
 
