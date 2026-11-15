@@ -7,6 +7,7 @@ import { formatDateShort } from '../lib/format';
 import {
   closePoll,
   deletePoll,
+  retractVote,
   subscribePoll,
   subscribePollVotes,
   tallyVotes,
@@ -16,7 +17,7 @@ import {
 function selectedLabelSuffix(vote, options) {
   if (!vote) return '';
   const index = Number(vote.optionIndex);
-  return options[index] ? ' · hai votato' : '';
+  return options[index] ? ' · hai votato: tocca di nuovo per togliere' : '';
 }
 
 /**
@@ -58,6 +59,19 @@ export function PollCard({ groupId, poll: snapshot = null, pollId = null, uid, c
       await votePoll({ groupId, pollId: id, uid, optionIndex: index });
     } catch (error) {
       toast.error(error.message || 'Voto non registrato.');
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const retract = async () => {
+    if (!id || busy) return;
+    setBusy(`vote-${id}`);
+    try {
+      await retractVote({ groupId, pollId: id, uid });
+      toast.success('Voto tolto.');
+    } catch (error) {
+      toast.error(error.message || 'Voto non rimosso.');
     } finally {
       setBusy('');
     }
@@ -110,9 +124,17 @@ export function PollCard({ groupId, poll: snapshot = null, pollId = null, uid, c
               className={`poll-option ${selected ? 'selected' : ''}`}
               onClick={(event) => {
                 event.stopPropagation();
-                vote(index);
+                if (selected) retract();
+                else vote(index);
               }}
               disabled={closed || busy === `vote-${id}`}
+              title={
+                closed
+                  ? 'Sondaggio chiuso'
+                  : selected
+                    ? 'Tocca di nuovo per togliere il voto'
+                    : 'Vota questa opzione'
+              }
             >
               <span className="poll-option-bar" style={{ width: `${percent}%` }} aria-hidden />
               <span className="poll-option-label">{option}</span>

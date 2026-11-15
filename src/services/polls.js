@@ -79,6 +79,12 @@ export async function votePoll({ groupId, pollId, uid, optionIndex }) {
   });
 }
 
+/** Toglie il proprio voto (come su WhatsApp: tocca di nuovo l'opzione scelta). */
+export async function retractVote({ groupId, pollId, uid }) {
+  if (!groupId || !pollId || !uid) throw new Error('Sondaggio non valido.');
+  await store.deleteDoc(pollVotePath(groupId, pollId, uid));
+}
+
 export async function closePoll({ groupId, pollId, uid = null, question = '' }) {
   await store.updateDoc(pollPath(groupId, pollId), {
     status: 'closed',
