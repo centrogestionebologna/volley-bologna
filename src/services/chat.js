@@ -165,7 +165,7 @@ export async function postGroupSystemMessage({ groupId, actorUid, text, kind = '
   const clean = String(text || '').trim().slice(0, 500);
   if (!clean) return null;
   try {
-    return await store.addDoc(groupChatPath(groupId), {
+    const messageId = await store.addDoc(groupChatPath(groupId), {
       authorId: actorUid,
       authorNickname: 'Sistema',
       text: clean,
@@ -177,6 +177,18 @@ export async function postGroupSystemMessage({ groupId, actorUid, text, kind = '
       deletedAt: null,
       replyTo: null,
     });
+    // Il worker volley-bologna-push avvisa gli altri membri del gruppo.
+    await queuePush({
+      type: 'group',
+      title: 'Aggiornamento del gruppo',
+      body: clean,
+      url: `/gruppi/${groupId}`,
+      tag: `gruppo-${groupId}`,
+      audience: 'group',
+      groupId,
+      actorId: actorUid,
+    });
+    return messageId;
   } catch (error) {
     console.warn('Evento del gruppo non pubblicato in chat', error?.message);
     return null;
@@ -186,7 +198,7 @@ export async function postGroupSystemMessage({ groupId, actorUid, text, kind = '
 /** Pubblica la scheda di un sondaggio nella chat del gruppo. */
 export async function postPollMessage({ groupId, actorUid, pollId, question, nickname = '' }) {
   if (!groupId || !actorUid || !pollId) return null;
-  return store.addDoc(groupChatPath(groupId), {
+  const messageId = await store.addDoc(groupChatPath(groupId), {
     authorId: actorUid,
     authorNickname: nickname || 'Membro',
     text: `Sondaggio: ${String(question || 'nuovo sondaggio').slice(0, 160)}`,
@@ -198,6 +210,17 @@ export async function postPollMessage({ groupId, actorUid, pollId, question, nic
     deletedAt: null,
     replyTo: null,
   });
+  await queuePush({
+    type: 'poll',
+    title: 'Nuovo sondaggio nel gruppo',
+    body: String(question || 'Apri la chat per votare').slice(0, 200),
+    url: `/gruppi/${groupId}`,
+    tag: `gruppo-${groupId}`,
+    audience: 'group',
+    groupId,
+    actorId: actorUid,
+  });
+  return messageId;
 }
 
 /** Pubblica una ricerca giocatori senza esporre il nome del gruppo né chi la lancia. */
